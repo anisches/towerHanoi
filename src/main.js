@@ -31,8 +31,8 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping
 renderer.toneMappingExposure = 1.0
 
 const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x1a1a2e)
-scene.fog = new THREE.FogExp2(0x1a1a2e, 0.016)
+scene.background = new THREE.Color(0x0d1b0a)
+scene.fog = new THREE.FogExp2(0x0d1b0a, 0.018)
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100)
 camera.position.set(0, 9, 16)
@@ -40,7 +40,7 @@ camera.lookAt(0, 2, 0)
 
 // ─── Lighting ─────────────────────────────────────────────────────────────────
 
-scene.add(new THREE.AmbientLight(0x6688cc, 0.5))
+scene.add(new THREE.AmbientLight(0x334422, 0.8))
 
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.2)
 keyLight.position.set(5, 12, 8)
@@ -115,13 +115,12 @@ function screenX(worldPos) {
   return (_projVec.x + 1) * 0.5 * window.innerWidth
 }
 
-function getNearestPegToDisk(diskSize) {
-  const diskSX = screenX(diskMeshes[diskSize].position)
+// Compare mouse screen X against each peg's projected screen X — no world-space parallax.
+function getNearestPegToClient(clientX) {
   let best = 0, bestDist = Infinity
   for (let i = 0; i < 3; i++) {
-    _projVec.set(PEG_X[i], PEG_HEIGHT * 0.5, 0)  // peg mid-height as reference
-    const pegSX = screenX(_projVec)
-    const d = Math.abs(diskSX - pegSX)
+    _projVec.set(PEG_X[i], PEG_HEIGHT * 0.5, 0)
+    const d = Math.abs(clientX - screenX(_projVec))
     if (d < bestDist) { bestDist = d; best = i }
   }
   return best
@@ -135,32 +134,30 @@ function buildScene() {
   ringMeshes.length = 0
   for (const k in diskMeshes) delete diskMeshes[k]
 
-  // Base platform
-  const base = new THREE.Mesh(
-    new THREE.BoxGeometry(20, 0.6, 5),
-    new THREE.MeshStandardMaterial({ color: 0x5d3a1a, roughness: 0.85, metalness: 0.05 })
+  // Landscape terrain — flat under the pegs, rolling hills beyond
+  const terrainGeo = new THREE.PlaneGeometry(80, 60, 120, 90)
+  terrainGeo.rotateX(-Math.PI / 2)
+  const tPos = terrainGeo.attributes.position
+  for (let i = 0; i < tPos.count; i++) {
+    const x = tPos.getX(i)
+    const z = tPos.getZ(i)
+    // Elliptical flat zone around the pegs, terrain rises outside it
+    const flatDist = Math.max(0, Math.sqrt((x / 12) ** 2 + (z / 5) ** 2) - 1)
+    const blend = Math.min(flatDist * flatDist * 0.6, 1)
+    const h = (
+      Math.sin(x * 0.28 + 1.1) * Math.cos(z * 0.41 + 0.8) * 1.8 +
+      Math.sin(x * 0.61 - 0.5) * Math.cos(z * 0.83 + 1.5) * 0.9 +
+      Math.sin(x * 1.32 + 2.0) * Math.cos(z * 1.17 - 0.3) * 0.35
+    ) * blend
+    tPos.setY(i, h)
+  }
+  terrainGeo.computeVertexNormals()
+  const terrain = new THREE.Mesh(
+    terrainGeo,
+    new THREE.MeshStandardMaterial({ color: 0x2d4a1e, roughness: 1.0, metalness: 0 })
   )
-  base.position.y = -0.3
-  base.receiveShadow = true
-  gameGroup.add(base)
-
-  // Gold trim edge
-  const trim = new THREE.Mesh(
-    new THREE.BoxGeometry(20.5, 0.1, 5.5),
-    new THREE.MeshStandardMaterial({ color: 0x8b6914, roughness: 0.45, metalness: 0.5 })
-  )
-  trim.position.y = -0.57
-  gameGroup.add(trim)
-
-  // Floor
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(60, 60),
-    new THREE.MeshStandardMaterial({ color: 0x16213e, roughness: 1.0 })
-  )
-  floor.rotation.x = -Math.PI / 2
-  floor.position.y = -0.65
-  floor.receiveShadow = true
-  gameGroup.add(floor)
+  terrain.receiveShadow = true
+  gameGroup.add(terrain)
 
   const ringR = getDiskRadius(NUM_DISKS) + 0.4
 
@@ -168,7 +165,7 @@ function buildScene() {
     // Peg rod
     const peg = new THREE.Mesh(
       new THREE.CylinderGeometry(PEG_RADIUS * 0.8, PEG_RADIUS, PEG_HEIGHT, 16),
-      new THREE.MeshStandardMaterial({ color: 0xb08040, roughness: 0.4, metalness: 0.45 })
+      new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.85, metalness: 0.05 })
     )
     peg.position.set(PEG_X[i], PEG_HEIGHT / 2, 0)
     peg.castShadow = true
@@ -247,11 +244,10 @@ function setRing(pegIdx, colorHex, opacity = 0.85) {
   r.material.emissiveIntensity = 1.4
 }
 
-// Color the ring of the peg the disk is hovering over
-function updateDragRings() {
+// Show ring for the peg the disk is snapped to
+function updateDragRings(nearPeg) {
   clearRings()
   const { diskSize, fromPeg } = dragInfo
-  const nearPeg = getNearestPegToDisk(diskSize)
   const toStack = stacks[nearPeg]
 
   if (nearPeg === fromPeg) {
@@ -365,13 +361,15 @@ canvas.addEventListener('mousemove', (e) => {
     return
   }
 
-  const x = getDragX(e)
-  if (x === null) return
+  const nearPeg = getNearestPegToClient(e.clientX)
+  const { diskSize, fromPeg } = dragInfo
+  const toStack = stacks[nearPeg]
+  const blocked = nearPeg !== fromPeg && toStack.length > 0 && toStack[toStack.length - 1] < diskSize
 
-  // X follows mouse immediately (even during lift)
-  diskMeshes[dragInfo.diskSize].position.x = x
+  // Blocked peg: keep disk at source, still show red ring so user knows why
+  diskMeshes[diskSize].position.x = blocked ? PEG_X[fromPeg] : PEG_X[nearPeg]
 
-  if (isDragging) updateDragRings()
+  if (isDragging) updateDragRings(nearPeg)
 })
 
 window.addEventListener('mouseup', (e) => {
@@ -392,7 +390,8 @@ window.addEventListener('mouseup', (e) => {
 
   const mesh = diskMeshes[dragInfo.diskSize]
   const diskX = mesh.position.x
-  const toPeg = getNearestPegToDisk(dragInfo.diskSize)
+  // Use disk's world X (already enforced to a valid snap) rather than raw mouse position
+  const toPeg = PEG_X.findIndex(px => Math.abs(px - diskX) < 0.01)
   const { diskSize, fromPeg, stackPos } = dragInfo
   const toStack = stacks[toPeg]
   const isValid = toPeg !== fromPeg && (!toStack.length || toStack[toStack.length - 1] > diskSize)
