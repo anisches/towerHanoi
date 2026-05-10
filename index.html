@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tower of Hanoi</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1a1a2e; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; }
+
+    #canvas { display: block; }
+
+    #hud {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 24px;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+      pointer-events: none;
+    }
+
+    #hud > * { pointer-events: all; }
+
+    .hud-title {
+      color: #f0c060;
+      font-size: 1.3rem;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-shadow: 0 0 20px rgba(240,192,96,0.5);
+    }
+
+    .hud-stats { display: flex; gap: 28px; }
+
+    .hud-stat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .hud-stat label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #777;
+    }
+
+    .hud-stat span {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #f0c060;
+    }
+
+    .hud-controls { display: flex; align-items: center; gap: 10px; }
+
+    select, button {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.14);
+      color: #ddd;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: background 0.2s;
+      outline: none;
+    }
+
+    select:hover, button:hover { background: rgba(255,255,255,0.14); }
+    select option { background: #1a1a2e; }
+
+    #hint {
+      position: fixed;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255,255,255,0.28);
+      font-size: 0.78rem;
+      letter-spacing: 0.5px;
+      pointer-events: none;
+    }
+
+    #win-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.68);
+      align-items: center;
+      justify-content: center;
+      backdrop-filter: blur(8px);
+      z-index: 10;
+    }
+
+    .win-card {
+      background: rgba(20, 20, 50, 0.96);
+      border: 1px solid rgba(240,192,96,0.35);
+      border-radius: 18px;
+      padding: 44px 68px;
+      text-align: center;
+      box-shadow: 0 0 80px rgba(240,192,96,0.12), 0 20px 60px rgba(0,0,0,0.5);
+    }
+
+    .win-card h2 {
+      color: #f0c060;
+      font-size: 2.5rem;
+      margin-bottom: 16px;
+      text-shadow: 0 0 30px rgba(240,192,96,0.5);
+    }
+
+    .win-card p {
+      color: #999;
+      font-size: 0.95rem;
+      margin-bottom: 5px;
+      line-height: 1.6;
+    }
+
+    .win-card p strong { color: #eee; }
+
+    #play-again-btn {
+      margin-top: 28px;
+      padding: 10px 36px;
+      font-size: 0.95rem;
+      background: rgba(240,192,96,0.12);
+      border-color: rgba(240,192,96,0.45);
+      color: #f0c060;
+      border-radius: 8px;
+      letter-spacing: 0.5px;
+    }
+
+    #play-again-btn:hover { background: rgba(240,192,96,0.22); }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <div id="hud">
+    <div class="hud-title">TOWER OF HANOI</div>
+
+    <div class="hud-stats">
+      <div class="hud-stat">
+        <label>Moves</label>
+        <span id="moves">0</span>
+      </div>
+      <div class="hud-stat">
+        <label>Minimum</label>
+        <span id="min-moves">15</span>
+      </div>
+    </div>
+
+    <div class="hud-controls">
+      <select id="disk-count">
+        <option value="3">3 disks</option>
+        <option value="4" selected>4 disks</option>
+        <option value="5">5 disks</option>
+        <option value="6">6 disks</option>
+        <option value="7">7 disks</option>
+      </select>
+      <button id="restart-btn">Restart</button>
+    </div>
+  </div>
+
+  <div id="hint">Drag the top disk to another peg &nbsp;·&nbsp; Green = valid &nbsp;·&nbsp; Red = blocked</div>
+
+  <div id="win-overlay">
+    <div class="win-card">
+      <h2>Solved!</h2>
+      <p>Completed in <strong><span id="win-moves">0</span> moves</strong></p>
+      <p>Optimal solution: <strong><span id="win-min">0</span> moves</strong></p>
+      <button id="play-again-btn">Play Again</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
