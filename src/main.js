@@ -377,6 +377,8 @@ canvas.addEventListener('mousemove', (e) => {
     }
     return
   }
+  // Drop/repel animation is running — let it own the disk position, don't override
+  if (animating) return
 
   const nearPeg = getNearestPegToClient(e.clientX)
   const { diskSize, fromPeg } = dragInfo
@@ -407,9 +409,11 @@ window.addEventListener('mouseup', (e) => {
 
   const mesh = diskMeshes[dragInfo.diskSize]
   const diskX = mesh.position.x
-  // Use disk's world X (already enforced to a valid snap) rather than raw mouse position
-  const toPeg = PEG_X.findIndex(px => Math.abs(px - diskX) < 0.01)
   const { diskSize, fromPeg, stackPos } = dragInfo
+  // Use disk's world X (already enforced to a valid snap) rather than raw mouse position.
+  // Fall back to fromPeg if x somehow drifted off a snap position.
+  let toPeg = PEG_X.findIndex(px => Math.abs(px - diskX) < 0.01)
+  if (toPeg === -1) toPeg = fromPeg
   const toStack = stacks[toPeg]
   const isValid = toPeg !== fromPeg && (!toStack.length || toStack[toStack.length - 1] > diskSize)
 
