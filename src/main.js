@@ -343,11 +343,21 @@ function getDragX(e) {
 canvas.addEventListener('mousedown', (e) => {
   if (animating || dragInfo || gameWon) return
 
-  const pegIdx = getPegAt(e)
-  if (pegIdx === -1 || !stacks[pegIdx].length) return
+  // Screen-space peg selection — same parallax-free approach as mousemove snap
+  let best = 0, bestDist = Infinity
+  for (let i = 0; i < 3; i++) {
+    _projVec.set(PEG_X[i], PEG_HEIGHT * 0.5, 0)
+    const d = Math.abs(e.clientX - screenX(_projVec))
+    if (d < bestDist) { bestDist = d; best = i }
+  }
+  // Gate on 3D click zone so clicks far outside the scene don't trigger
+  setMouse(e)
+  raycaster.setFromCamera(mouse, camera)
+  if (!raycaster.intersectObjects(clickZones).length) return
+  if (!stacks[best].length) return
 
-  const diskSize = stacks[pegIdx][stacks[pegIdx].length - 1]
-  dragInfo = { diskSize, fromPeg: pegIdx, stackPos: stacks[pegIdx].length - 1 }
+  const diskSize = stacks[best][stacks[best].length - 1]
+  dragInfo = { diskSize, fromPeg: best, stackPos: stacks[best].length - 1 }
   liftAnim = { t: 0, startY: diskMeshes[diskSize].position.y }
   isDragging = false
 
@@ -356,8 +366,15 @@ canvas.addEventListener('mousedown', (e) => {
 
 canvas.addEventListener('mousemove', (e) => {
   if (!dragInfo) {
-    const p = getPegAt(e)
-    document.body.style.cursor = (p !== -1 && stacks[p].length > 0) ? 'grab' : 'default'
+    setMouse(e)
+    raycaster.setFromCamera(mouse, camera)
+    const hits = raycaster.intersectObjects(clickZones)
+    if (hits.length) {
+      const p = getNearestPegToClient(e.clientX)
+      document.body.style.cursor = stacks[p].length > 0 ? 'grab' : 'default'
+    } else {
+      document.body.style.cursor = 'default'
+    }
     return
   }
 
@@ -426,9 +443,56 @@ window.addEventListener('mouseup', (e) => {
 
 // ─── UI ───────────────────────────────────────────────────────────────────────
 
+const DISK_COLORS_HEX = [
+  '#e74c3c', '#e67e22', '#f1c40f',
+  '#2ecc71', '#3498db', '#9b59b6', '#1abc9c',
+]
+
+function updateDebugDisplay() {
+  const ids = ['debug-a', 'debug-b', 'debug-c']
+  for (let p = 0; p < 3; p++) {
+    const el = document.getElementById(ids[p])
+    el.innerHTML = ''
+    const stack = stacks[p]
+    for (let s = 0; s < stack.length; s++) {
+      const size = stack[s]
+      const div = document.createElement('div')
+      div.className = 'debug-disk' + (s === stack.length - 1 ? ' top' : '')
+      div.style.background = DISK_COLORS_HEX[(size - 1) % DISK_COLORS_HEX.length]
+      div.textContent = size
+      el.appendChild(div)
+    }
+    if (!stack.length) {
+      const empty = document.createElement('div')
+      empty.style.color = 'rgba(255,255,255,0.2)'
+      empty.style.fontSize = '0.7rem'
+      empty.textContent = '—'
+      el.appendChild(empty)
+    }
+  }
+}
+
+// Highlight the top disk on each peg so it's clear what's grabbable
+function updateTopDiskHighlight() {
+  for (let size = 1; size <= NUM_DISKS; size++) {
+    if (diskMeshes[size]) diskMeshes[size].material.emissiveIntensity = 0
+  }
+  if (dragInfo || animating) return
+  for (let p = 0; p < 3; p++) {
+    if (stacks[p].length) {
+      const topSize = stacks[p][stacks[p].length - 1]
+      if (diskMeshes[topSize]) {
+        diskMeshes[topSize].material.emissive.copy(diskMeshes[topSize].material.color)
+        diskMeshes[topSize].material.emissiveIntensity = 0.25
+      }
+    }
+  }
+}
+
 function updateUI() {
   document.getElementById('moves').textContent = moves
   document.getElementById('min-moves').textContent = (1 << NUM_DISKS) - 1
+  updateDebugDisplay()
 }
 
 function checkWin() {
@@ -480,6 +544,7 @@ function animate(time) {
   if (liftAnim) tickLift(delta)
   if (dropAnim) tickDrop(delta)
 
+  updateTopDiskHighlight()
   renderer.render(scene, camera)
 }
 

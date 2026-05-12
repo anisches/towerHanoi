@@ -81,6 +81,52 @@
       pointer-events: none;
     }
 
+    #debug-stacks {
+      position: fixed;
+      bottom: 46px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 32px;
+      pointer-events: none;
+    }
+
+    .debug-peg {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .debug-peg-label {
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: rgba(255,255,255,0.3);
+    }
+
+    .debug-disks {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+
+    .debug-disk {
+      width: 18px;
+      height: 18px;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.62rem;
+      font-weight: 700;
+      color: rgba(0,0,0,0.7);
+    }
+
+    .debug-disk.top {
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.7);
+    }
+
     #win-overlay {
       display: none;
       position: fixed;
@@ -161,6 +207,12 @@
   </div>
 
   <div id="hint">Drag the top disk to another peg &nbsp;·&nbsp; Green = valid &nbsp;·&nbsp; Red = blocked</div>
+
+  <div id="debug-stacks">
+    <div class="debug-peg"><div class="debug-peg-label">Peg A</div><div class="debug-disks" id="debug-a"></div></div>
+    <div class="debug-peg"><div class="debug-peg-label">Peg B</div><div class="debug-disks" id="debug-b"></div></div>
+    <div class="debug-peg"><div class="debug-peg-label">Peg C</div><div class="debug-disks" id="debug-c"></div></div>
+  </div>
 
   <div id="win-overlay">
     <div class="win-card">
