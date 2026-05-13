@@ -19,6 +19,40 @@ const DISK_COLORS = [
   0x2ecc71, 0x3498db, 0x9b59b6, 0x1abc9c,
 ]
 
+// ─── Theme ────────────────────────────────────────────────────────────────────
+
+const THEMES = {
+  night: {
+    scene: 0x0d1b0a,
+    fogDensity: 0.018,
+    ambient: { color: 0x334422, intensity: 0.8 },
+    key:     { color: 0xffffff, intensity: 1.2 },
+    fill:    { color: 0x4466aa, intensity: 0.4 },
+    terrain: 0x2d4a1e,
+    peg:     0x8a8a8a,
+    exposure: 1.0,
+    icon: '☀️',  // shown on toggle to switch TO day
+  },
+  day: {
+    scene: 0xa8d0e6,
+    fogDensity: 0.010,
+    ambient: { color: 0xfff0d0, intensity: 1.1 },
+    key:     { color: 0xfff4dc, intensity: 1.7 },
+    fill:    { color: 0x88aacc, intensity: 0.45 },
+    terrain: 0x5c8c34,
+    peg:     0x9a8a78,
+    exposure: 1.05,
+    icon: '🌙',  // shown on toggle to switch TO night
+  },
+}
+
+let currentTheme = 'night'
+
+function pickThemeByTime() {
+  const h = new Date().getHours()
+  return h >= 6 && h < 18 ? 'day' : 'night'
+}
+
 // ─── Renderer / Scene / Camera ────────────────────────────────────────────────
 
 const canvas = document.getElementById('canvas')
@@ -31,8 +65,8 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping
 renderer.toneMappingExposure = 1.0
 
 const scene = new THREE.Scene()
-scene.background = new THREE.Color(0x0d1b0a)
-scene.fog = new THREE.FogExp2(0x0d1b0a, 0.018)
+scene.background = new THREE.Color(0x000000)
+scene.fog = new THREE.FogExp2(0x000000, 0.018)
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100)
 camera.position.set(0, 9, 16)
@@ -40,7 +74,8 @@ camera.lookAt(0, 2, 0)
 
 // ─── Lighting ─────────────────────────────────────────────────────────────────
 
-scene.add(new THREE.AmbientLight(0x334422, 0.8))
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.8)
+scene.add(ambientLight)
 
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.2)
 keyLight.position.set(5, 12, 8)
@@ -55,9 +90,33 @@ keyLight.shadow.camera.bottom = -4
 keyLight.shadow.bias = -0.001
 scene.add(keyLight)
 
-const fillLight = new THREE.DirectionalLight(0x4466aa, 0.4)
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.4)
 fillLight.position.set(-5, 5, -5)
 scene.add(fillLight)
+
+let terrainMesh = null
+const pegMaterials = []  // collected during buildScene so applyTheme can recolor them
+
+function applyTheme(name) {
+  currentTheme = name
+  const t = THEMES[name]
+  scene.background.setHex(t.scene)
+  scene.fog.color.setHex(t.scene)
+  scene.fog.density = t.fogDensity
+  ambientLight.color.setHex(t.ambient.color)
+  ambientLight.intensity = t.ambient.intensity
+  keyLight.color.setHex(t.key.color)
+  keyLight.intensity = t.key.intensity
+  fillLight.color.setHex(t.fill.color)
+  fillLight.intensity = t.fill.intensity
+  renderer.toneMappingExposure = t.exposure
+  if (terrainMesh) terrainMesh.material.color.setHex(t.terrain)
+  for (const m of pegMaterials) m.color.setHex(t.peg)
+
+  document.body.classList.toggle('light', name === 'day')
+  const tog = document.getElementById('theme-toggle')
+  if (tog) tog.textContent = t.icon
+}
 
 // ─── Game State ───────────────────────────────────────────────────────────────
 
@@ -132,6 +191,7 @@ function buildScene() {
   while (gameGroup.children.length > 0) gameGroup.remove(gameGroup.children[0])
   clickZones.length = 0
   ringMeshes.length = 0
+  pegMaterials.length = 0
   for (const k in diskMeshes) delete diskMeshes[k]
 
   // Landscape terrain — flat under the pegs, rolling hills beyond
@@ -152,20 +212,22 @@ function buildScene() {
     tPos.setY(i, h)
   }
   terrainGeo.computeVertexNormals()
-  const terrain = new THREE.Mesh(
+  terrainMesh = new THREE.Mesh(
     terrainGeo,
     new THREE.MeshStandardMaterial({ color: 0x2d4a1e, roughness: 1.0, metalness: 0 })
   )
-  terrain.receiveShadow = true
-  gameGroup.add(terrain)
+  terrainMesh.receiveShadow = true
+  gameGroup.add(terrainMesh)
 
   const ringR = getDiskRadius(NUM_DISKS) + 0.4
 
   for (let i = 0; i < 3; i++) {
     // Peg rod
+    const pegMat = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.85, metalness: 0.05 })
+    pegMaterials.push(pegMat)
     const peg = new THREE.Mesh(
       new THREE.CylinderGeometry(PEG_RADIUS * 0.8, PEG_RADIUS, PEG_HEIGHT, 16),
-      new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.85, metalness: 0.05 })
+      pegMat
     )
     peg.position.set(PEG_X[i], PEG_HEIGHT / 2, 0)
     peg.castShadow = true
@@ -524,6 +586,7 @@ function initGame(n) {
   animating = false
 
   buildScene()
+  applyTheme(currentTheme)  // recolor freshly built terrain + pegs to active theme
   positionAllDisks()
   updateUI()
   document.getElementById('win-overlay').style.display = 'none'
@@ -560,6 +623,10 @@ document.getElementById('restart-btn').addEventListener('click', () => {
 document.getElementById('play-again-btn').addEventListener('click', () => {
   initGame(parseInt(document.getElementById('disk-count').value))
 })
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  applyTheme(currentTheme === 'day' ? 'night' : 'day')
+})
 
+currentTheme = pickThemeByTime()
 initGame(4)
 requestAnimationFrame(animate)

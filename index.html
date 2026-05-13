@@ -5,8 +5,60 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Tower of Hanoi</title>
   <style>
+    /* Dark (night) — default */
+    :root {
+      --bg: #1a1a2e;
+      --text: #ddd;
+      --text-muted: #777;
+      --text-faint: rgba(255,255,255,0.28);
+      --debug-label: rgba(255,255,255,0.3);
+      --debug-empty: rgba(255,255,255,0.2);
+      --top-outline: rgba(255,255,255,0.7);
+      --accent: #f0c060;
+      --accent-glow: rgba(240,192,96,0.5);
+      --accent-soft: rgba(240,192,96,0.12);
+      --accent-mid: rgba(240,192,96,0.35);
+      --accent-strong: rgba(240,192,96,0.45);
+      --accent-hover: rgba(240,192,96,0.22);
+      --panel-bg: rgba(255,255,255,0.07);
+      --panel-bg-hover: rgba(255,255,255,0.14);
+      --panel-border: rgba(255,255,255,0.14);
+      --hud-grad: rgba(0,0,0,0.55);
+      --win-overlay-bg: rgba(0,0,0,0.68);
+      --win-card-bg: rgba(20,20,50,0.96);
+      --win-card-shadow: 0 0 80px rgba(240,192,96,0.12), 0 20px 60px rgba(0,0,0,0.5);
+      --win-text: #999;
+      --win-text-strong: #eee;
+    }
+
+    /* Light (day) */
+    body.light {
+      --bg: #c8e0ee;
+      --text: #2a2a3e;
+      --text-muted: #555;
+      --text-faint: rgba(20,20,40,0.45);
+      --debug-label: rgba(20,20,40,0.5);
+      --debug-empty: rgba(20,20,40,0.3);
+      --top-outline: rgba(20,20,40,0.6);
+      --accent: #a06b00;
+      --accent-glow: rgba(160,107,0,0.35);
+      --accent-soft: rgba(160,107,0,0.12);
+      --accent-mid: rgba(160,107,0,0.35);
+      --accent-strong: rgba(160,107,0,0.55);
+      --accent-hover: rgba(160,107,0,0.22);
+      --panel-bg: rgba(255,255,255,0.5);
+      --panel-bg-hover: rgba(255,255,255,0.75);
+      --panel-border: rgba(20,20,40,0.18);
+      --hud-grad: rgba(255,255,255,0.45);
+      --win-overlay-bg: rgba(255,255,255,0.55);
+      --win-card-bg: rgba(255,255,255,0.96);
+      --win-card-shadow: 0 0 80px rgba(160,107,0,0.18), 0 20px 60px rgba(20,20,40,0.2);
+      --win-text: #555;
+      --win-text-strong: #222;
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #1a1a2e; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; }
+    body { background: var(--bg); overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; transition: background 0.4s; }
 
     #canvas { display: block; }
 
@@ -17,18 +69,18 @@
       align-items: center;
       justify-content: space-between;
       padding: 16px 24px;
-      background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+      background: linear-gradient(to bottom, var(--hud-grad), transparent);
       pointer-events: none;
     }
 
     #hud > * { pointer-events: all; }
 
     .hud-title {
-      color: #f0c060;
+      color: var(--accent);
       font-size: 1.3rem;
       font-weight: 700;
       letter-spacing: 3px;
-      text-shadow: 0 0 20px rgba(240,192,96,0.5);
+      text-shadow: 0 0 20px var(--accent-glow);
     }
 
     .hud-stats { display: flex; gap: 28px; }
@@ -44,21 +96,21 @@
       font-size: 0.65rem;
       text-transform: uppercase;
       letter-spacing: 1.5px;
-      color: #777;
+      color: var(--text-muted);
     }
 
     .hud-stat span {
       font-size: 1.4rem;
       font-weight: 700;
-      color: #f0c060;
+      color: var(--accent);
     }
 
     .hud-controls { display: flex; align-items: center; gap: 10px; }
 
     select, button {
-      background: rgba(255,255,255,0.07);
-      border: 1px solid rgba(255,255,255,0.14);
-      color: #ddd;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      color: var(--text);
       padding: 6px 14px;
       border-radius: 6px;
       font-size: 0.82rem;
@@ -67,15 +119,15 @@
       outline: none;
     }
 
-    select:hover, button:hover { background: rgba(255,255,255,0.14); }
-    select option { background: #1a1a2e; }
+    select:hover, button:hover { background: var(--panel-bg-hover); }
+    select option { background: var(--bg); color: var(--text); }
 
     #hint {
       position: fixed;
       bottom: 22px;
       left: 50%;
       transform: translateX(-50%);
-      color: rgba(255,255,255,0.28);
+      color: var(--text-faint);
       font-size: 0.78rem;
       letter-spacing: 0.5px;
       pointer-events: none;
@@ -102,7 +154,7 @@
       font-size: 0.6rem;
       text-transform: uppercase;
       letter-spacing: 1.5px;
-      color: rgba(255,255,255,0.3);
+      color: var(--debug-label);
     }
 
     .debug-disks {
@@ -124,14 +176,14 @@
     }
 
     .debug-disk.top {
-      box-shadow: 0 0 0 2px rgba(255,255,255,0.7);
+      box-shadow: 0 0 0 2px var(--top-outline);
     }
 
     #win-overlay {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.68);
+      background: var(--win-overlay-bg);
       align-items: center;
       justify-content: center;
       backdrop-filter: blur(8px);
@@ -139,42 +191,53 @@
     }
 
     .win-card {
-      background: rgba(20, 20, 50, 0.96);
-      border: 1px solid rgba(240,192,96,0.35);
+      background: var(--win-card-bg);
+      border: 1px solid var(--accent-mid);
       border-radius: 18px;
       padding: 44px 68px;
       text-align: center;
-      box-shadow: 0 0 80px rgba(240,192,96,0.12), 0 20px 60px rgba(0,0,0,0.5);
+      box-shadow: var(--win-card-shadow);
     }
 
     .win-card h2 {
-      color: #f0c060;
+      color: var(--accent);
       font-size: 2.5rem;
       margin-bottom: 16px;
-      text-shadow: 0 0 30px rgba(240,192,96,0.5);
+      text-shadow: 0 0 30px var(--accent-glow);
     }
 
     .win-card p {
-      color: #999;
+      color: var(--win-text);
       font-size: 0.95rem;
       margin-bottom: 5px;
       line-height: 1.6;
     }
 
-    .win-card p strong { color: #eee; }
+    .win-card p strong { color: var(--win-text-strong); }
 
     #play-again-btn {
       margin-top: 28px;
       padding: 10px 36px;
       font-size: 0.95rem;
-      background: rgba(240,192,96,0.12);
-      border-color: rgba(240,192,96,0.45);
-      color: #f0c060;
+      background: var(--accent-soft);
+      border-color: var(--accent-strong);
+      color: var(--accent);
       border-radius: 8px;
       letter-spacing: 0.5px;
     }
 
-    #play-again-btn:hover { background: rgba(240,192,96,0.22); }
+    #play-again-btn:hover { background: var(--accent-hover); }
+
+    #theme-toggle {
+      position: fixed;
+      bottom: 22px;
+      right: 24px;
+      padding: 6px 12px;
+      font-size: 0.75rem;
+      letter-spacing: 0.5px;
+      opacity: 0.7;
+    }
+    #theme-toggle:hover { opacity: 1; }
   </style>
 </head>
 <body>
@@ -213,6 +276,8 @@
     <div class="debug-peg"><div class="debug-peg-label">Peg B</div><div class="debug-disks" id="debug-b"></div></div>
     <div class="debug-peg"><div class="debug-peg-label">Peg C</div><div class="debug-disks" id="debug-c"></div></div>
   </div>
+
+  <button id="theme-toggle" title="Toggle day/night">🌙</button>
 
   <div id="win-overlay">
     <div class="win-card">
