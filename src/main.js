@@ -23,7 +23,7 @@ const DISK_COLORS = [
 
 const THEMES = {
   night: {
-    scene: 0x0d1b0a,
+    scene: 0x1c1917,  // tailwind stone-900
     fogDensity: 0.018,
     ambient: { color: 0x334422, intensity: 0.8 },
     key:     { color: 0xffffff, intensity: 1.2 },
@@ -34,13 +34,13 @@ const THEMES = {
     icon: '☀️',  // shown on toggle to switch TO day
   },
   day: {
-    scene: 0xa8d0e6,
+    scene: 0xd6d3d1,  // tailwind stone-300
     fogDensity: 0.010,
     ambient: { color: 0xfff0d0, intensity: 1.1 },
     key:     { color: 0xfff4dc, intensity: 1.7 },
-    fill:    { color: 0x88aacc, intensity: 0.45 },
-    terrain: 0x5c8c34,
-    peg:     0x9a8a78,
+    fill:    { color: 0xb8b0a8, intensity: 0.45 },
+    terrain: 0xa8a29e,  // tailwind stone-400
+    peg:     0x57534e,  // tailwind stone-600
     exposure: 1.05,
     icon: '🌙',  // shown on toggle to switch TO night
   },
