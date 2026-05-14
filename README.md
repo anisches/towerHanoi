@@ -1,6 +1,6 @@
 # Tower of Hanoi
 
-A 3D Tower of Hanoi puzzle built with [Three.js](https://threejs.org/) and [Vite](https://vitejs.dev/). Drag the top disk to another peg — green ring means a valid move, red means blocked.
+A 3D Tower of Hanoi puzzle built with [Three.js](https://threejs.org/). Drag the top disk to another peg — green ring means a valid move, red means blocked.
 
 ![screenshot](screenshot.png)
 
