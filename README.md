@@ -1,28 +1,49 @@
-# Tower of Hanoi
+# Tower of Hanoi 3D
 
-A 3D Tower of Hanoi puzzle built with [Three.js](https://threejs.org/). Drag the top disk to another peg — green ring means a valid move, red means blocked.
+🚧 **Early stage of development** — This is a work-in-progress project. More features, optimizations, and mobile support coming soon!
 
-![screenshot](screenshot.png)
+A beautiful 3D Tower of Hanoi puzzle built with [Three.js](https://threejs.org/) + Vite. Drag-and-drop disks between pegs with visual feedback (green = valid, red = invalid).
 
-## Features
+## ✨ Features
+- **Interactive 3D gameplay** — Drag the top disk only
+- 3 to 7 disks with smooth animations
+- Move counter + optimal solution target
+- Auto day/night theme (based on local time) + manual toggle
+- Debug stack info panel
+- Clean, modern UI
 
-- Drag-and-drop with snap-to-peg
-- 3 to 7 disks
-- Move counter + optimal-move target
-- Auto day/night theme based on local time (with manual toggle)
-- Debug stack readout at the bottom
-
-## Run locally
+## 🎮 Play Now
+No live demo yet (early stage). Clone and run locally in seconds:
 
 ```bash
+git clone https://github.com/anisches/towerofHanoi.git
+cd towerofHanoi
+
+# Install & run
 npm install
 npm run dev
 ```
 
-Then open the URL Vite prints (usually http://localhost:5173).
+Open the URL shown in terminal (usually http://localhost:5173).
 
-## Build
-
+## 🛠️ Build for Production
 ```bash
 npm run build
 ```
+The built files will be in the `dist` folder.
+
+## 🚀 Future Plans
+- Live demo on GitHub Pages
+- Mobile touch support
+- Sound effects & win animations
+- Difficulty levels & undo/redo
+- Leaderboard (optional)
+
+## 📄 License
+This project is licensed under the [MIT License](LICENSE) — free to use, modify, and distribute.
+
+---
+
+Made with ❤️ using Three.js & Vite
+
+**Star this repo if you like it!** ⭐
