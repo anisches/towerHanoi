@@ -17,24 +17,6 @@ A beautiful 3D Tower of Hanoi puzzle built with [Three.js](https://threejs.org/)
 
 No need to clone! Just click and play instantly 🎉
 
-## 🛠️ Run Locally (optional)
-```bash
-git clone https://github.com/anisches/towerofHanoi.git
-cd towerofHanoi
-
-# Install & run
-npm install
-npm run dev
-```
-
-Open the URL shown in terminal (usually http://localhost:5173).
-
-## 🛠️ Build for Production
-```bash
-npm run build
-```
-The built files will be in the `dist` folder.
-
 ## 🚀 Future Plans
 - Mobile touch support
 - Sound effects & win animations
