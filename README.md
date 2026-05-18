@@ -13,8 +13,11 @@ A beautiful 3D Tower of Hanoi puzzle built with [Three.js](https://threejs.org/)
 - Clean, modern UI
 
 ## 🎮 Play Now
-No live demo yet (early stage). Clone and run locally in seconds:
+[▶️ Play the Game Now](https://anisches.github.io/towerofHanoi/)
 
+No need to clone! Just click and play instantly 🎉
+
+## 🛠️ Run Locally (optional)
 ```bash
 git clone https://github.com/anisches/towerofHanoi.git
 cd towerofHanoi
@@ -33,7 +36,6 @@ npm run build
 The built files will be in the `dist` folder.
 
 ## 🚀 Future Plans
-- Live demo on GitHub Pages
 - Mobile touch support
 - Sound effects & win animations
 - Difficulty levels & undo/redo
