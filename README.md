@@ -17,12 +17,6 @@ A beautiful 3D Tower of Hanoi puzzle built with [Three.js](https://threejs.org/)
 
 No need to clone! Just click and play instantly 🎉
 
-## 🚀 Future Plans
-- Mobile touch support
-- Sound effects & win animations
-- Difficulty levels & undo/redo
-- Leaderboard (optional)
-
 ## 📄 License
 This project is licensed under the [MIT License](LICENSE) — free to use, modify, and distribute.
 
