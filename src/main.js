@@ -1,16 +1,16 @@
 import * as THREE from 'three/webgpu'
 import { setupVolumetricLighting, enableLightForVolumetrics } from './volumetric.js'
 // ─── Constants ────────────────────────────────────────────────────────────────
-const PEG_SPACING = 5.5
-const PEG_X = [-PEG_SPACING, 0, PEG_SPACING]
-const PEG_HEIGHT = 5.5
-const PEG_RADIUS = 0.13
+const TOWER_SPACING = 5.5
+const TOWER_X = [-TOWER_SPACING, 0, TOWER_SPACING]
+const TOWER_HEIGHT = 5.5
+const TOWER_RADIUS = 0.13
 const BASE_TOP_Y = 0.06
 const DISK_HEIGHT = 0.42
 const DISK_GAP = 0.06
 const DISK_MIN_R = 0.7
 const DISK_MAX_R = 2.2
-const LIFT_Y = PEG_HEIGHT + 2.0
+const LIFT_Y = TOWER_HEIGHT + 2.0
 const LIFT_DUR = 0.22
 const DROP_DUR = { across: 0.13, repelAcross: 0.38 }
 const GRAVITY = -110
@@ -37,7 +37,7 @@ const THEMES = {
     volumetric: { intensity: 1.0, smoke: 1.4 },
     fill: { color: 0x4a5a70, intensity: 0.06, position: [8, 6, 10] },
     terrain: 0x4a4f58,
-    peg: 0x6d727a,
+    tower: 0x6d727a,
     dust: 0x96a0b4,
     exposure: 2.0,
     icon: '☀️', // shown on toggle to switch TO day
@@ -50,7 +50,7 @@ const THEMES = {
     key: { color: 0xfff4dc, intensity: 1.7, position: [5, 12, 8] },
     fill: { color: 0xb8b0a8, intensity: 0.45, position: [-5, 5, -5] },
     terrain: 0xa8a29e, // tailwind stone-400
-    peg: 0x57534e, // tailwind stone-600
+    tower: 0x57534e, // tailwind stone-600
     dust: 0xc2b9ad,
     exposure: 1.05,
     icon: '🌙', // shown on toggle to switch TO night
@@ -346,12 +346,12 @@ const earthTilt = new THREE.Group()
 earthTilt.rotation.z = 0.2
 earthTilt.add(earthMesh, cloudMesh, createHaloMesh(EARTH_RADIUS * 1.16, 0x4d7dff, 5, 0.65))
 nightSkyGroup.add(earthTilt)
-// World-fixed, centered behind the middle peg: from the default view the
-// composition reads tower → middle peg → Earth, straight down the z axis.
+// World-fixed, centered behind the middle tower: from the default view the
+// composition reads tower → middle tower → Earth, straight down the z axis.
 const EARTH_DIST = 260
 const EARTH_ELEV = 0.24 // rad above the horizon — high enough to clear the hills
 earthTilt.position.set(
-  PEG_X[1],
+  TOWER_X[1],
   Math.sin(EARTH_ELEV) * EARTH_DIST,
   -Math.cos(EARTH_ELEV) * EARTH_DIST,
 )
@@ -496,7 +496,7 @@ scene.add(droneGroup)
 droneGroup.visible = false
 const volumetricLights = [moonSpot, ...drones.map((d) => d.spot)]
 let terrainMesh = null
-const pegMaterials = [] // collected during buildScene so applyTheme can recolor them
+const towerMaterials = [] // collected during buildScene so applyTheme can recolor them
 function applyTheme(name) {
   currentTheme = name
   const t = THEMES[name]
@@ -565,7 +565,7 @@ function applyTheme(name) {
   }
   renderer.toneMappingExposure = t.exposure
   if (terrainMesh) terrainMesh.material.color.setHex(t.terrain)
-  for (const m of pegMaterials) m.color.setHex(t.peg)
+  for (const m of towerMaterials) m.color.setHex(t.tower)
   document.body.classList.toggle('light', name === 'day')
   const tog = document.getElementById('theme-toggle')
   if (tog) tog.textContent = t.icon
@@ -594,7 +594,7 @@ function snapshotThemeState() {
     droneInt: drones[0]?.spot.intensity ?? 0,
     exposure: renderer.toneMappingExposure,
     terrain: terrainMesh ? terrainMesh.material.color.clone() : new THREE.Color(),
-    peg: pegMaterials[0] ? pegMaterials[0].color.clone() : new THREE.Color(),
+    tower: towerMaterials[0] ? towerMaterials[0].color.clone() : new THREE.Color(),
     skyFade: skyFadeUniform.value,
     volumetric: volumetricLevel,
   }
@@ -621,7 +621,7 @@ function themeTargets(name) {
     droneInt: isNight && t.droneSpot ? t.droneSpot.intensity : 0,
     exposure: t.exposure,
     terrain: new THREE.Color(t.terrain),
-    peg: new THREE.Color(t.peg),
+    tower: new THREE.Color(t.tower),
     skyFade: isNight ? 1 : 0,
     volumetric: isNight ? (t.volumetric?.intensity ?? 1.0) : 0,
   }
@@ -668,7 +668,7 @@ function tickThemeTransition(delta) {
   for (const d of drones) d.spot.intensity = lerp(a.droneInt, b.droneInt, p)
   renderer.toneMappingExposure = lerp(a.exposure, b.exposure, p)
   if (terrainMesh) terrainMesh.material.color.copy(a.terrain).lerp(b.terrain, p)
-  for (const m of pegMaterials) m.color.copy(a.peg).lerp(b.peg, p)
+  for (const m of towerMaterials) m.color.copy(a.tower).lerp(b.tower, p)
   skyFadeUniform.value = lerp(a.skyFade, b.skyFade, p)
   starField.material.opacity = 0.9 * skyFadeUniform.value
   volumetricLevel = lerp(a.volumetric, b.volumetric, p)
@@ -690,7 +690,7 @@ let stacks = [[], [], []]
 let moves = 0
 let gameWon = false
 // Drag state — lives only while user has mouse button held
-let dragInfo = null // { diskSize, fromPeg, stackPos, targetX, bobT }
+let dragInfo = null // { diskSize, fromTower, stackPos, targetX, bobT }
 let isDragging = false // disk actively follows mouse (after lift completes)
 let liftAnim = null // { t, startY }
 // Post-release animation
@@ -724,7 +724,7 @@ function easeOutBack(t, s = 2.8) {
   const u = t - 1
   return u * u * ((s + 1) * u + s) + 1
 }
-// Project disk center and each peg center to screen space, pick closest peg.
+// Project disk center and each tower center to screen space, pick closest tower.
 // Avoids the parallax error from comparing world X at LIFT_Y vs world X at ground.
 const _projVec = new THREE.Vector3()
 function screenX(worldPos) {
@@ -732,11 +732,11 @@ function screenX(worldPos) {
   _projVec.project(camera)
   return (_projVec.x + 1) * 0.5 * window.innerWidth
 }
-// Compare mouse screen X against each peg's projected screen X — no world-space parallax.
-function getNearestPegToClient(clientX) {
+// Compare mouse screen X against each tower's projected screen X — no world-space parallax.
+function getNearestTowerToClient(clientX) {
   let best = 0, bestDist = Infinity
   for (let i = 0; i < 3; i++) {
-    _projVec.set(PEG_X[i], PEG_HEIGHT * 0.5, 0)
+    _projVec.set(TOWER_X[i], TOWER_HEIGHT * 0.5, 0)
     const d = Math.abs(clientX - screenX(_projVec))
     if (d < bestDist) { bestDist = d; best = i }
   }
@@ -903,7 +903,7 @@ function buildScene() {
   while (gameGroup.children.length > 0) gameGroup.remove(gameGroup.children[0])
   clickZones.length = 0
   ringMeshes.length = 0
-  pegMaterials.length = 0
+  towerMaterials.length = 0
   for (const k in diskMeshes) delete diskMeshes[k]
   for (const k in diskFX) delete diskFX[k]
   // Vast landscape — flat play zone, prior rolling hills beyond
@@ -917,7 +917,7 @@ function buildScene() {
     const x = tPos.getX(i)
     const z = tPos.getZ(i)
     const dist = Math.sqrt(x * x + z * z)
-    // Elliptical flat zone under the pegs
+    // Elliptical flat zone under the towers
     const flatDist = Math.max(0, Math.sqrt((x / 12) ** 2 + (z / 5) ** 2) - 1)
     const blend = Math.min(flatDist * flatDist * 0.55, 1)
     const hills = (
@@ -938,35 +938,35 @@ function buildScene() {
   gameGroup.add(terrainMesh)
   const ringR = getDiskRadius(NUM_DISKS) + 0.4
   for (let i = 0; i < 3; i++) {
-    // Peg rod + rounded cap
-    const pegMat = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.85, metalness: 0.05 })
-    pegMaterials.push(pegMat)
-    const peg = new THREE.Mesh(
-      new THREE.CylinderGeometry(PEG_RADIUS * 0.8, PEG_RADIUS, PEG_HEIGHT, 16),
-      pegMat,
+    // Tower rod + rounded cap
+    const towerMat = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.85, metalness: 0.05 })
+    towerMaterials.push(towerMat)
+    const tower = new THREE.Mesh(
+      new THREE.CylinderGeometry(TOWER_RADIUS * 0.8, TOWER_RADIUS, TOWER_HEIGHT, 16),
+      towerMat,
     )
-    peg.position.set(PEG_X[i], PEG_HEIGHT / 2, 0)
-    peg.castShadow = true
-    gameGroup.add(peg)
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(PEG_RADIUS * 0.8, 12, 8), pegMat)
-    cap.position.set(PEG_X[i], PEG_HEIGHT, 0)
+    tower.position.set(TOWER_X[i], TOWER_HEIGHT / 2, 0)
+    tower.castShadow = true
+    gameGroup.add(tower)
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(TOWER_RADIUS * 0.8, 12, 8), towerMat)
+    cap.position.set(TOWER_X[i], TOWER_HEIGHT, 0)
     cap.castShadow = true
     gameGroup.add(cap)
-    // Landing pad under each peg — grounds the tower visually
+    // Landing pad under each tower — grounds the tower visually
     const pad = new THREE.Mesh(
       new THREE.CylinderGeometry(ringR + 0.3, ringR + 0.45, 0.16, 48),
-      pegMat,
+      towerMat,
     )
-    pad.position.set(PEG_X[i], -0.02, 0)
+    pad.position.set(TOWER_X[i], -0.02, 0)
     pad.receiveShadow = true
     gameGroup.add(pad)
     // Wide invisible cylinder — easy click/drag target
     const cz = new THREE.Mesh(
-      new THREE.CylinderGeometry(DISK_MAX_R + 0.5, DISK_MAX_R + 0.5, PEG_HEIGHT + 1, 8),
+      new THREE.CylinderGeometry(DISK_MAX_R + 0.5, DISK_MAX_R + 0.5, TOWER_HEIGHT + 1, 8),
       new THREE.MeshBasicMaterial({ visible: false }),
     )
-    cz.position.set(PEG_X[i], PEG_HEIGHT / 2 - 0.5, 0)
-    cz.userData = { pegIndex: i }
+    cz.position.set(TOWER_X[i], TOWER_HEIGHT / 2 - 0.5, 0)
+    cz.userData = { towerIndex: i }
     gameGroup.add(cz)
     clickZones.push(cz)
     // Ring indicator
@@ -981,7 +981,7 @@ function buildScene() {
       }),
     )
     ring.rotation.x = Math.PI / 2
-    ring.position.set(PEG_X[i], 0.13, 0)
+    ring.position.set(TOWER_X[i], 0.13, 0)
     ring.userData = { targetOpacity: 0, targetIntensity: 0, pulse: false }
     gameGroup.add(ring)
     ringMeshes.push(ring)
@@ -1015,8 +1015,8 @@ function clearRings() {
     r.userData.pulse = false
   }
 }
-function setRing(pegIdx, colorHex, opacity = 0.85) {
-  const r = ringMeshes[pegIdx]
+function setRing(towerIdx, colorHex, opacity = 0.85) {
+  const r = ringMeshes[towerIdx]
   r.material.color.set(colorHex)
   r.material.emissive.set(colorHex)
   r.userData.targetOpacity = opacity
@@ -1033,17 +1033,17 @@ function tickRings(delta, time) {
     r.scale.set(s, s, 1)
   }
 }
-// Show ring for the peg the disk is snapped to
-function updateDragRings(nearPeg) {
+// Show ring for the tower the disk is snapped to
+function updateDragRings(nearTower) {
   clearRings()
-  const { diskSize, fromPeg } = dragInfo
-  const toStack = stacks[nearPeg]
-  if (nearPeg === fromPeg) {
-    setRing(nearPeg, 0xffeb3b, 0.5)
+  const { diskSize, fromTower } = dragInfo
+  const toStack = stacks[nearTower]
+  if (nearTower === fromTower) {
+    setRing(nearTower, 0xffeb3b, 0.5)
   } else if (!toStack.length || toStack[toStack.length - 1] > diskSize) {
-    setRing(nearPeg, 0x00e676) // green = valid
+    setRing(nearTower, 0x00e676) // green = valid
   } else {
-    setRing(nearPeg, 0xff3333) // red = blocked
+    setRing(nearTower, 0xff3333) // red = blocked
   }
 }
 // ─── Disk FX ── squash & stretch + velocity tilt, shared by every animation ──
@@ -1085,7 +1085,7 @@ function tickRestingDisks() {
       const mesh = diskMeshes[size]
       const fx = diskFX[size]
       if (!mesh || !fx) continue
-      mesh.position.x = PEG_X[p]
+      mesh.position.x = TOWER_X[p]
       mesh.position.z = 0
       mesh.position.y = getDiskY(s) - (1 - Math.min(fx.squash, 1)) * DISK_HEIGHT * 0.5
     }
@@ -1101,11 +1101,11 @@ function tickFxQueue() {
 }
 // Impact: squash the landing disk, puff dust at its rim, thud, shake the camera,
 // and send a compression wave down the stack underneath
-function onDiskImpact(diskSize, peg, restY, impact, belowCount) {
+function onDiskImpact(diskSize, tower, restY, impact, belowCount) {
   applySquashImpulse(diskSize, impact * 5.5)
   const r = getDiskRadius(diskSize)
   spawnDust(
-    PEG_X[peg],
+    TOWER_X[tower],
     Math.max(restY - DISK_HEIGHT / 2, BASE_TOP_Y) + 0.04,
     0,
     r,
@@ -1115,7 +1115,7 @@ function onDiskImpact(diskSize, peg, restY, impact, belowCount) {
   addShake(impact * 0.05 + (diskSize / NUM_DISKS) * impact * 0.06)
   sfx.drop(Math.min(impact + 0.2, 1))
   for (let d = 0; d < belowCount; d++) {
-    const size = stacks[peg][belowCount - 1 - d]
+    const size = stacks[tower][belowCount - 1 - d]
     if (size == null) break
     fxQueue.push({ at: clockTime + 0.03 + d * 0.035, size, impulse: impact * 2.2 * Math.pow(0.7, d) })
   }
@@ -1131,7 +1131,7 @@ function tickLift(delta) {
     isDragging = true
   }
 }
-// ─── Drag Spring ── disk chases the snapped peg with a damped spring + bob ───
+// ─── Drag Spring ── disk chases the snapped tower with a damped spring + bob ───
 function tickDragSpring(delta) {
   if (!dragInfo || !isDragging || animating) return
   const mesh = diskMeshes[dragInfo.diskSize]
@@ -1146,8 +1146,8 @@ function tickDragSpring(delta) {
 function finishDrop(a) {
   diskMeshes[a.diskSize].position.y = a.targetY
   if (a.type === 'valid') {
-    stacks[a.fromPeg].pop()
-    stacks[a.toPeg].push(a.diskSize)
+    stacks[a.fromTower].pop()
+    stacks[a.toTower].push(a.diskSize)
     moves++
     updateUI()
     checkWin()
@@ -1180,20 +1180,20 @@ function tickDrop(delta) {
     if (!a.bounced && impact > 0.2) {
       a.bounced = true
       a.vy = -a.vy * BOUNCE_RESTITUTION
-      onDiskImpact(a.diskSize, a.peg, a.targetY, impact, a.belowCount)
+      onDiskImpact(a.diskSize, a.tower, a.targetY, impact, a.belowCount)
     } else {
       finishDrop(a)
     }
   }
 }
-// ─── Intro ── disks rain onto the first peg, bottom-up, with bounce + dust ───
+// ─── Intro ── disks rain onto the first tower, bottom-up, with bounce + dust ───
 function startIntro() {
   introAnims = []
   for (let s = 0; s < stacks[0].length; s++) {
     const size = stacks[0][s]
     const targetY = getDiskY(s)
-    diskMeshes[size].position.set(PEG_X[0], targetY + 7 + s * 2.6, 0)
-    introAnims.push({ size, peg: 0, targetY, vy: 0, bounced: false, belowCount: s })
+    diskMeshes[size].position.set(TOWER_X[0], targetY + 7 + s * 2.6, 0)
+    introAnims.push({ size, tower: 0, targetY, vy: 0, bounced: false, belowCount: s })
   }
   animating = introAnims.length > 0
 }
@@ -1209,7 +1209,7 @@ function tickIntro(delta) {
     if (!a.bounced && impact > 0.2) {
       a.bounced = true
       a.vy = -a.vy * BOUNCE_RESTITUTION
-      onDiskImpact(a.size, a.peg, a.targetY, impact * 0.8, a.belowCount)
+      onDiskImpact(a.size, a.tower, a.targetY, impact * 0.8, a.belowCount)
     } else {
       introAnims.splice(i, 1)
       if (!introAnims.length && !dropAnim) animating = false
@@ -1292,10 +1292,10 @@ function startCameraPan(e) {
 }
 function tryStartDiskDrag(e) {
   if (animating || dragInfo || gameWon) return false
-  // Screen-space peg selection — same parallax-free approach as mousemove snap
+  // Screen-space tower selection — same parallax-free approach as mousemove snap
   let best = 0, bestDist = Infinity
   for (let i = 0; i < 3; i++) {
-    _projVec.set(PEG_X[i], PEG_HEIGHT * 0.5, 0)
+    _projVec.set(TOWER_X[i], TOWER_HEIGHT * 0.5, 0)
     const d = Math.abs(e.clientX - screenX(_projVec))
     if (d < bestDist) { bestDist = d; best = i }
   }
@@ -1305,7 +1305,7 @@ function tryStartDiskDrag(e) {
   if (!raycaster.intersectObjects(clickZones).length) return false
   if (!stacks[best].length) return false
   const diskSize = stacks[best][stacks[best].length - 1]
-  dragInfo = { diskSize, fromPeg: best, stackPos: stacks[best].length - 1, targetX: PEG_X[best], bobT: 0 }
+  dragInfo = { diskSize, fromTower: best, stackPos: stacks[best].length - 1, targetX: TOWER_X[best], bobT: 0 }
   liftAnim = { t: 0, startY: diskMeshes[diskSize].position.y }
   isDragging = false
   diskFX[diskSize].vx = 0
@@ -1354,7 +1354,7 @@ canvas.addEventListener('mousemove', (e) => {
     raycaster.setFromCamera(mouse, camera)
     const hits = raycaster.intersectObjects(clickZones)
     if (hits.length) {
-      const p = getNearestPegToClient(e.clientX)
+      const p = getNearestTowerToClient(e.clientX)
       document.body.style.cursor = stacks[p].length > 0 ? 'grab' : 'default'
     } else {
       document.body.style.cursor = 'default'
@@ -1363,13 +1363,13 @@ canvas.addEventListener('mousemove', (e) => {
   }
   // Drop/repel animation is running — let it own the disk position, don't override
   if (animating) return
-  const nearPeg = getNearestPegToClient(e.clientX)
-  const { diskSize, fromPeg } = dragInfo
-  const toStack = stacks[nearPeg]
-  const blocked = nearPeg !== fromPeg && toStack.length > 0 && toStack[toStack.length - 1] < diskSize
-  // Blocked peg: spring stays at source, still show red ring so user knows why
-  dragInfo.targetX = blocked ? PEG_X[fromPeg] : PEG_X[nearPeg]
-  if (isDragging) updateDragRings(nearPeg)
+  const nearTower = getNearestTowerToClient(e.clientX)
+  const { diskSize, fromTower } = dragInfo
+  const toStack = stacks[nearTower]
+  const blocked = nearTower !== fromTower && toStack.length > 0 && toStack[toStack.length - 1] < diskSize
+  // Blocked tower: spring stays at source, still show red ring so user knows why
+  dragInfo.targetX = blocked ? TOWER_X[fromTower] : TOWER_X[nearTower]
+  if (isDragging) updateDragRings(nearTower)
 })
 window.addEventListener('mouseup', (e) => {
   if (isPanning) {
@@ -1392,37 +1392,37 @@ window.addEventListener('mouseup', (e) => {
   animating = true
   clearRings()
   const mesh = diskMeshes[dragInfo.diskSize]
-  const { diskSize, fromPeg, stackPos, targetX } = dragInfo
+  const { diskSize, fromTower, stackPos, targetX } = dragInfo
   diskFX[diskSize].vx = 0
-  // The snapped target X (not the springing mesh position) decides the peg
-  let toPeg = PEG_X.findIndex(px => Math.abs(px - targetX) < 0.01)
-  if (toPeg === -1) toPeg = fromPeg
-  const toStack = stacks[toPeg]
-  const isValid = toPeg !== fromPeg && (!toStack.length || toStack[toStack.length - 1] > diskSize)
+  // The snapped target X (not the springing mesh position) decides the tower
+  let toTower = TOWER_X.findIndex(px => Math.abs(px - targetX) < 0.01)
+  if (toTower === -1) toTower = fromTower
+  const toStack = stacks[toTower]
+  const isValid = toTower !== fromTower && (!toStack.length || toStack[toStack.length - 1] > diskSize)
   document.body.style.cursor = 'default'
   if (isValid) {
     dropAnim = {
       type: 'valid',
-      diskSize, fromPeg, toPeg, peg: toPeg,
+      diskSize, fromTower, toTower, tower: toTower,
       phase: 'across', t: 0, vy: 0, bounced: false,
       startX: mesh.position.x,
-      targetX: PEG_X[toPeg],
+      targetX: TOWER_X[toTower],
       targetY: getDiskY(toStack.length),
       belowCount: toStack.length,
     }
   } else {
-    // Flash invalid peg red briefly
-    if (toPeg !== fromPeg) {
-      setRing(toPeg, 0xff3333, 0.9)
+    // Flash invalid tower red briefly
+    if (toTower !== fromTower) {
+      setRing(toTower, 0xff3333, 0.9)
       setTimeout(clearRings, 320)
       sfx.invalid()
     }
     dropAnim = {
-      type: toPeg === fromPeg ? 'return' : 'repel',
-      diskSize, fromPeg, peg: fromPeg,
+      type: toTower === fromTower ? 'return' : 'repel',
+      diskSize, fromTower, tower: fromTower,
       phase: 'across', t: 0, vy: 0, bounced: false,
       startX: mesh.position.x,
-      targetX: PEG_X[fromPeg],
+      targetX: TOWER_X[fromTower],
       targetY: getDiskY(stackPos),
       belowCount: stackPos,
     }
@@ -1466,7 +1466,7 @@ function updateDebugDisplay() {
     }
   }
 }
-// Highlight the top disk on each peg so it's clear what's grabbable
+// Highlight the top disk on each tower so it's clear what's grabbable
 function updateTopDiskHighlight() {
   for (let size = 1; size <= NUM_DISKS; size++) {
     if (diskMeshes[size]) diskMeshes[size].material.emissiveIntensity = 0
@@ -1505,10 +1505,10 @@ function updateUI() {
 // ─── Win Celebration ──────────────────────────────────────────────────────────
 function celebrate() {
   sfx.win()
-  const topY = PEG_HEIGHT + 1.2
-  spawnConfetti(PEG_X[2], topY, 0, 90)
-  setTimeout(() => spawnConfetti(PEG_X[0], topY * 0.8, 0, 50), 280)
-  setTimeout(() => spawnConfetti(PEG_X[1], topY * 0.9, 0, 50), 520)
+  const topY = TOWER_HEIGHT + 1.2
+  spawnConfetti(TOWER_X[2], topY, 0, 90)
+  setTimeout(() => spawnConfetti(TOWER_X[0], topY * 0.8, 0, 50), 280)
+  setTimeout(() => spawnConfetti(TOWER_X[1], topY * 0.9, 0, 50), 520)
   // Bounce wave up the solved tower
   for (let s = 0; s < stacks[2].length; s++) {
     fxQueue.push({ at: clockTime + 0.15 + s * 0.07, size: stacks[2][s], impulse: 3.2 })
@@ -1539,7 +1539,7 @@ function initGame(n) {
   fxQueue.length = 0
   themeTransition = null // mid-fade restart: snap to the target theme
   buildScene()
-  applyTheme(currentTheme) // recolor freshly built terrain + pegs to active theme
+  applyTheme(currentTheme) // recolor freshly built terrain + towers to active theme
   startIntro()
   updateUI()
   document.getElementById('win-overlay').style.display = 'none'

@@ -2,7 +2,7 @@
 
 🚧 **Early stage of development** — This is a work-in-progress project. More features, optimizations, and mobile support coming soon!
 
-A beautiful 3D Tower of Hanoi puzzle built with [Three.js](https://threejs.org/) (WebGPU) + Vite. Drag-and-drop disks between pegs with visual feedback (green = valid, red = invalid) — set on another world, with Earth hanging in the night sky.
+A beautiful 3D Tower of Hanoi puzzle built with [Three.js](https://threejs.org/) (WebGPU) + Vite. Drag-and-drop disks between towers with visual feedback (green = valid, red = invalid) — set on another world, with Earth hanging in the night sky.
 
 ![Tower of Hanoi 3D — night scene with Earth in the sky](screenshot.png)
 
