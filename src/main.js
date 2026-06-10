@@ -5,14 +5,20 @@ const PEG_SPACING = 5.5
 const PEG_X = [-PEG_SPACING, 0, PEG_SPACING]
 const PEG_HEIGHT = 5.5
 const PEG_RADIUS = 0.13
-const BASE_TOP_Y = 0
+const BASE_TOP_Y = 0.06
 const DISK_HEIGHT = 0.42
 const DISK_GAP = 0.06
 const DISK_MIN_R = 0.7
 const DISK_MAX_R = 2.2
 const LIFT_Y = PEG_HEIGHT + 2.0
-const LIFT_DUR = 0.16
-const DROP_DUR = { across: 0.18, down: 0.2, repelAcross: 0.38, repelDown: 0.2 }
+const LIFT_DUR = 0.22
+const DROP_DUR = { across: 0.13, repelAcross: 0.38 }
+const GRAVITY = -110
+const BOUNCE_RESTITUTION = 0.22
+const SQUASH_STIFFNESS = 170
+const SQUASH_DAMPING = 11
+const DRAG_SPRING_K = 150
+const DRAG_SPRING_DAMPING = 0.92 // damping ratio (1 = critically damped)
 const DISK_COLORS = [
   0xe74c3c, 0xe67e22, 0xf1c40f,
   0x2ecc71, 0x3498db, 0x9b59b6, 0x1abc9c,
@@ -32,6 +38,7 @@ const THEMES = {
     fill: { color: 0x4a5a70, intensity: 0.06, position: [8, 6, 10] },
     terrain: 0x4a4f58,
     peg: 0x6d727a,
+    dust: 0x96a0b4,
     exposure: 2.0,
     icon: '☀️', // shown on toggle to switch TO day
   },
@@ -44,6 +51,7 @@ const THEMES = {
     fill: { color: 0xb8b0a8, intensity: 0.45, position: [-5, 5, -5] },
     terrain: 0xa8a29e, // tailwind stone-400
     peg: 0x57534e, // tailwind stone-600
+    dust: 0xc2b9ad,
     exposure: 1.05,
     icon: '🌙', // shown on toggle to switch TO night
   },
@@ -52,6 +60,45 @@ let currentTheme = 'night'
 function pickThemeByTime() {
   const h = new Date().getHours()
   return h >= 6 && h < 18 ? 'day' : 'night'
+}
+// ─── Audio ── tiny lazy WebAudio synth (no assets) ───────────────────────────
+let audioCtx = null
+let audioMuted = false
+function getAudioCtx() {
+  if (!audioCtx) {
+    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)() } catch { return null }
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume()
+  return audioCtx
+}
+function tone({ freq = 440, type = 'sine', dur = 0.15, vol = 0.08, attack = 0.005, sweep = 0, delay = 0 }) {
+  const ctx = getAudioCtx()
+  // Skip while suspended so queued tones don't burst out on first resume
+  if (!ctx || audioMuted || ctx.state !== 'running') return
+  const t0 = ctx.currentTime + delay
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = type
+  osc.frequency.setValueAtTime(freq, t0)
+  if (sweep) osc.frequency.exponentialRampToValueAtTime(Math.max(freq + sweep, 30), t0 + dur)
+  gain.gain.setValueAtTime(0, t0)
+  gain.gain.linearRampToValueAtTime(vol, t0 + attack)
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
+  osc.connect(gain).connect(ctx.destination)
+  osc.start(t0)
+  osc.stop(t0 + dur + 0.05)
+}
+const sfx = {
+  lift: () => tone({ freq: 340, type: 'triangle', dur: 0.12, vol: 0.05, sweep: 160 }),
+  drop: (impact = 1) => {
+    tone({ freq: 110 + impact * 50, type: 'sine', dur: 0.18, vol: 0.1 * impact, sweep: -60 })
+    tone({ freq: 900, type: 'triangle', dur: 0.04, vol: 0.025 * impact })
+  },
+  invalid: () => tone({ freq: 160, type: 'sawtooth', dur: 0.18, vol: 0.045, sweep: -40 }),
+  win: () => {
+    const notes = [523.25, 659.25, 783.99, 1046.5, 1318.5]
+    notes.forEach((f, i) => tone({ freq: f, type: 'triangle', dur: 0.5, vol: 0.06, delay: i * 0.11 }))
+  },
 }
 // ─── Renderer / Scene / Camera ────────────────────────────────────────────────
 const canvas = document.getElementById('canvas')
@@ -119,11 +166,200 @@ scene.add(moonSpot)
 scene.add(moonSpot.target)
 const nightSkyGroup = new THREE.Group()
 scene.add(nightSkyGroup)
+// ─── Alien Sky ── cratered moon + distant Earth: this game isn't played from home
+function mulberry32(seed) {
+  let a = seed >>> 0
+  return () => {
+    a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+function makeCanvas(w, h) {
+  const cv = document.createElement('canvas')
+  cv.width = w
+  cv.height = h
+  return [cv, cv.getContext('2d')]
+}
+function canvasToTexture(cv) {
+  const tex = new THREE.CanvasTexture(cv)
+  tex.colorSpace = THREE.SRGBColorSpace
+  tex.anisotropy = 4
+  return tex
+}
+function createEarthTexture() {
+  const w = 1024, h = 512
+  const [cv, ctx] = makeCanvas(w, h)
+  const rand = mulberry32(20260610)
+  const ocean = ctx.createLinearGradient(0, 0, 0, h)
+  ocean.addColorStop(0, '#33588f')
+  ocean.addColorStop(0.5, '#1c5b9e')
+  ocean.addColorStop(1, '#33588f')
+  ctx.fillStyle = ocean
+  ctx.fillRect(0, 0, w, h)
+  // Continents — random-walk blob clusters, drawn thrice so they wrap the seam
+  const landColors = ['#4d7a45', '#5d8a4a', '#7d7a4a', '#8a7d52']
+  for (let c = 0; c < 7; c++) {
+    let x = rand() * w
+    let y = h * (0.18 + rand() * 0.64)
+    const blobs = 60 + Math.floor(rand() * 90)
+    ctx.globalAlpha = 0.85
+    for (let b = 0; b < blobs; b++) {
+      const r = 8 + rand() * 26
+      ctx.fillStyle = landColors[Math.floor(rand() * landColors.length)]
+      for (const ox of [-w, 0, w]) {
+        ctx.beginPath()
+        ctx.ellipse(x + ox, y, r * (0.7 + rand() * 0.7), r * (0.5 + rand() * 0.6), rand() * Math.PI, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      x += (rand() - 0.5) * 52
+      y = Math.max(h * 0.1, Math.min(h * 0.9, y + (rand() - 0.5) * 30))
+      if (x < 0) x += w
+      if (x > w) x -= w
+    }
+  }
+  // Polar ice caps
+  ctx.globalAlpha = 1
+  for (const top of [true, false]) {
+    const capH = h * 0.13
+    const g = ctx.createLinearGradient(0, top ? 0 : h, 0, top ? capH : h - capH)
+    g.addColorStop(0, 'rgba(245,250,255,0.96)')
+    g.addColorStop(1, 'rgba(245,250,255,0)')
+    ctx.fillStyle = g
+    ctx.fillRect(0, top ? 0 : h - capH, w, capH)
+  }
+  return canvasToTexture(cv)
+}
+function createCloudTexture() {
+  const w = 1024, h = 512
+  const [cv, ctx] = makeCanvas(w, h)
+  const rand = mulberry32(99)
+  ctx.fillStyle = '#ffffff'
+  for (let i = 0; i < 90; i++) {
+    const x = rand() * w
+    const y = h * (0.08 + rand() * 0.84)
+    const len = 30 + rand() * 120
+    const segs = 4 + Math.floor(rand() * 7)
+    ctx.globalAlpha = 0.1 + rand() * 0.22
+    for (let s = 0; s < segs; s++) {
+      const sx = x + (s / segs) * len
+      const sy = y + (rand() - 0.5) * 14
+      const r = 9 + rand() * 22
+      for (const ox of [-w, 0, w]) {
+        ctx.beginPath()
+        ctx.ellipse(sx + ox, sy, r * 1.6, r * 0.55, 0, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+  }
+  ctx.globalAlpha = 1
+  return canvasToTexture(cv)
+}
+function createMoonTexture() {
+  const w = 512, h = 256
+  const [cv, ctx] = makeCanvas(w, h)
+  const rand = mulberry32(42)
+  ctx.fillStyle = '#c9cdd8'
+  ctx.fillRect(0, 0, w, h)
+  // Maria — large dark basalt patches
+  for (let i = 0; i < 14; i++) {
+    ctx.globalAlpha = 0.1 + rand() * 0.12
+    ctx.fillStyle = '#8e94a4'
+    ctx.beginPath()
+    ctx.ellipse(rand() * w, 40 + rand() * (h - 80), 20 + rand() * 60, 14 + rand() * 40, rand() * Math.PI, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  // Craters — dark floor with an offset bright rim
+  for (let i = 0; i < 80; i++) {
+    const x = rand() * w
+    const y = 14 + rand() * (h - 28)
+    const r = 1.5 + rand() * 9
+    ctx.globalAlpha = 0.25 + rand() * 0.3
+    ctx.fillStyle = '#9aa0b0'
+    ctx.beginPath()
+    ctx.arc(x, y, r, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#e6eaf2'
+    ctx.beginPath()
+    ctx.arc(x - r * 0.25, y - r * 0.25, r * 0.55, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.globalAlpha = 1
+  return canvasToTexture(cv)
+}
+// Shared "sun" so the moon and Earth phases agree
+const PLANET_SUN_DIR = new THREE.Vector3(-0.7, 0.28, 0.6).normalize()
+// 0..1 master fade for moon/Earth/stars — animated by the theme transition
+const skyFadeUniform = THREE.TSL.uniform(1)
+function planetDayAmount(wrap) {
+  const { uniform, normalWorld } = THREE.TSL
+  return normalWorld.normalize().dot(uniform(PLANET_SUN_DIR)).mul(0.5).add(0.5).pow(wrap)
+}
+// Unlit node material with baked wrapped day/night terminator + optional atmosphere rim
+function createPlanetMaterial(map, { nightDim = 0.05, wrap = 1.3, boost = 1.15, rim = null } = {}) {
+  const { texture, normalWorld, positionWorld, cameraPosition, vec3, float } = THREE.TSL
+  const mat = new THREE.MeshBasicNodeMaterial({ fog: false, transparent: true })
+  mat.opacityNode = skyFadeUniform
+  const day = planetDayAmount(wrap)
+  let color = texture(map).rgb.mul(day.mul(boost).add(nightDim))
+  if (rim) {
+    const viewDir = cameraPosition.sub(positionWorld).normalize()
+    const fres = float(1).sub(normalWorld.normalize().dot(viewDir).clamp(0, 1)).pow(2.8)
+    color = color.add(vec3(...rim).mul(fres).mul(day.add(0.2)))
+  }
+  mat.colorNode = color
+  return mat
+}
+// Additive back-face shell — soft glow extending past the limb
+function createHaloMesh(radius, colorHex, power, strength) {
+  const { normalWorld, positionWorld, cameraPosition, color } = THREE.TSL
+  const mat = new THREE.MeshBasicNodeMaterial({
+    fog: false,
+    transparent: true,
+    side: THREE.BackSide,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  })
+  const viewDir = cameraPosition.sub(positionWorld).normalize()
+  const limb = normalWorld.normalize().dot(viewDir).add(1).clamp(0, 1).pow(power)
+  mat.colorNode = color(colorHex).mul(limb.mul(strength)).mul(skyFadeUniform)
+  return new THREE.Mesh(new THREE.SphereGeometry(radius, 48, 32), mat)
+}
+const MOON_RADIUS = 4.2
 const moonMesh = new THREE.Mesh(
-  new THREE.SphereGeometry(2.4, 20, 20),
-  new THREE.MeshBasicMaterial({ color: 0xe8f0ff, fog: false }),
+  new THREE.SphereGeometry(MOON_RADIUS, 48, 32),
+  createPlanetMaterial(createMoonTexture(), { nightDim: 0.12, wrap: 0.8, boost: 1.2 }),
 )
+moonMesh.add(createHaloMesh(MOON_RADIUS * 1.3, 0xdce8ff, 6, 0.5))
 nightSkyGroup.add(moonMesh)
+const EARTH_RADIUS = 30
+const earthMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(EARTH_RADIUS, 64, 48),
+  createPlanetMaterial(createEarthTexture(), { boost: 0.85, nightDim: 0.04, rim: [0.18, 0.33, 0.7] }),
+)
+const cloudMat = new THREE.MeshBasicNodeMaterial({ fog: false, transparent: true, depthWrite: false })
+cloudMat.colorNode = THREE.TSL.vec3(1, 1, 1).mul(planetDayAmount(1.1).mul(0.85).add(0.05))
+cloudMat.opacityNode = THREE.TSL.texture(createCloudTexture()).a.mul(0.85).mul(skyFadeUniform)
+const cloudMesh = new THREE.Mesh(new THREE.SphereGeometry(EARTH_RADIUS * 1.012, 64, 48), cloudMat)
+const earthTilt = new THREE.Group()
+earthTilt.rotation.z = 0.2
+earthTilt.add(earthMesh, cloudMesh, createHaloMesh(EARTH_RADIUS * 1.16, 0x4d7dff, 5, 0.65))
+nightSkyGroup.add(earthTilt)
+// World-fixed, centered behind the middle peg: from the default view the
+// composition reads tower → middle peg → Earth, straight down the z axis.
+const EARTH_DIST = 260
+const EARTH_ELEV = 0.24 // rad above the horizon — high enough to clear the hills
+earthTilt.position.set(
+  PEG_X[1],
+  Math.sin(EARTH_ELEV) * EARTH_DIST,
+  -Math.cos(EARTH_ELEV) * EARTH_DIST,
+)
+function tickEarth(delta) {
+  if (!nightSkyGroup.visible) return
+  earthMesh.rotation.y += delta * 0.012
+  cloudMesh.rotation.y += delta * 0.018
+}
 function buildStarField(count = 1400) {
   const positions = new Float32Array(count * 3)
   const colors = new Float32Array(count * 3)
@@ -304,8 +540,11 @@ function applyTheme(name) {
   }
   nightSkyGroup.visible = isNight
   droneGroup.visible = isNight
+  skyFadeUniform.value = isNight ? 1 : 0
+  starField.material.opacity = isNight ? 0.9 : 0
+  volumetricLevel = isNight ? (t.volumetric?.intensity ?? 1.0) : 0
   if (setVolumetricEnabled) {
-    setVolumetricEnabled(isNight, t.volumetric?.intensity ?? 1.0)
+    setVolumetricEnabled(isNight, volumetricLevel)
   }
   if (setVolumetricSmoke && t.volumetric) setVolumetricSmoke(t.volumetric.smoke)
   if (renderPipeline) {
@@ -331,18 +570,138 @@ function applyTheme(name) {
   const tog = document.getElementById('theme-toggle')
   if (tog) tog.textContent = t.icon
 }
+// ─── Theme Transition ── crossfade the whole world instead of hard-cutting ───
+const THEME_TRANSITION_DUR = 1.8
+let themeTransition = null // { t, to, from, targets, mid }
+let volumetricLevel = 0
+function snapshotThemeState() {
+  return {
+    sky: scene.background.clone(),
+    fogColor: scene.fog ? scene.fog.color.clone() : new THREE.Color(THEMES.night.fog),
+    fogDensity: scene.fog ? scene.fog.density : THEMES.night.fogDensity,
+    hemiSky: hemiLight.color.clone(),
+    hemiGround: hemiLight.groundColor.clone(),
+    hemiInt: hemiLight.intensity,
+    ambColor: ambientLight.color.clone(),
+    ambInt: ambientLight.intensity,
+    keyColor: keyLight.color.clone(),
+    keyInt: keyLight.intensity,
+    keyPos: keyLight.position.clone(),
+    fillColor: fillLight.color.clone(),
+    fillInt: fillLight.intensity,
+    fillPos: fillLight.position.clone(),
+    moonInt: moonSpot.intensity,
+    droneInt: drones[0]?.spot.intensity ?? 0,
+    exposure: renderer.toneMappingExposure,
+    terrain: terrainMesh ? terrainMesh.material.color.clone() : new THREE.Color(),
+    peg: pegMaterials[0] ? pegMaterials[0].color.clone() : new THREE.Color(),
+    skyFade: skyFadeUniform.value,
+    volumetric: volumetricLevel,
+  }
+}
+function themeTargets(name) {
+  const t = THEMES[name]
+  const isNight = name === 'night'
+  return {
+    sky: new THREE.Color(t.sky ?? t.scene),
+    fogColor: new THREE.Color(t.fog ?? t.sky ?? t.scene),
+    fogDensity: t.fogDensity,
+    hemiSky: new THREE.Color(t.hemi.sky),
+    hemiGround: new THREE.Color(t.hemi.ground),
+    hemiInt: t.hemi.intensity,
+    ambColor: new THREE.Color(t.ambient.color),
+    ambInt: t.ambient.intensity,
+    keyColor: new THREE.Color(t.key.color),
+    keyInt: t.key.intensity,
+    keyPos: new THREE.Vector3(...t.key.position),
+    fillColor: new THREE.Color(t.fill.color),
+    fillInt: t.fill.intensity,
+    fillPos: new THREE.Vector3(...t.fill.position),
+    moonInt: isNight && t.moonSpot ? t.moonSpot.intensity : 0,
+    droneInt: isNight && t.droneSpot ? t.droneSpot.intensity : 0,
+    exposure: t.exposure,
+    terrain: new THREE.Color(t.terrain),
+    peg: new THREE.Color(t.peg),
+    skyFade: isNight ? 1 : 0,
+    volumetric: isNight ? (t.volumetric?.intensity ?? 1.0) : 0,
+  }
+}
+function startThemeTransition(name) {
+  if (currentTheme === name && !themeTransition) return
+  const from = snapshotThemeState()
+  currentTheme = name
+  // Everything that fades must be visible for the duration; applyTheme at the
+  // end settles the final visibility flags.
+  nightSkyGroup.visible = true
+  droneGroup.visible = true
+  moonSpot.visible = true
+  if (!scene.fog) scene.fog = new THREE.FogExp2(from.fogColor.getHex(), from.fogDensity)
+  themeTransition = { t: 0, to: name, from, targets: themeTargets(name), mid: false }
+  const tog = document.getElementById('theme-toggle')
+  if (tog) tog.textContent = THEMES[name].icon
+}
+function tickThemeTransition(delta) {
+  if (!themeTransition) return
+  const tr = themeTransition
+  tr.t += delta / THEME_TRANSITION_DUR
+  const p = easeInOut(Math.min(tr.t, 1))
+  const a = tr.from
+  const b = tr.targets
+  const lerp = THREE.MathUtils.lerp
+  scene.background.copy(a.sky).lerp(b.sky, p)
+  if (scene.fog) {
+    scene.fog.color.copy(a.fogColor).lerp(b.fogColor, p)
+    scene.fog.density = lerp(a.fogDensity, b.fogDensity, p)
+  }
+  hemiLight.color.copy(a.hemiSky).lerp(b.hemiSky, p)
+  hemiLight.groundColor.copy(a.hemiGround).lerp(b.hemiGround, p)
+  hemiLight.intensity = lerp(a.hemiInt, b.hemiInt, p)
+  ambientLight.color.copy(a.ambColor).lerp(b.ambColor, p)
+  ambientLight.intensity = lerp(a.ambInt, b.ambInt, p)
+  keyLight.color.copy(a.keyColor).lerp(b.keyColor, p)
+  keyLight.intensity = lerp(a.keyInt, b.keyInt, p)
+  keyLight.position.lerpVectors(a.keyPos, b.keyPos, p)
+  fillLight.color.copy(a.fillColor).lerp(b.fillColor, p)
+  fillLight.intensity = lerp(a.fillInt, b.fillInt, p)
+  fillLight.position.lerpVectors(a.fillPos, b.fillPos, p)
+  moonSpot.intensity = lerp(a.moonInt, b.moonInt, p)
+  for (const d of drones) d.spot.intensity = lerp(a.droneInt, b.droneInt, p)
+  renderer.toneMappingExposure = lerp(a.exposure, b.exposure, p)
+  if (terrainMesh) terrainMesh.material.color.copy(a.terrain).lerp(b.terrain, p)
+  for (const m of pegMaterials) m.color.copy(a.peg).lerp(b.peg, p)
+  skyFadeUniform.value = lerp(a.skyFade, b.skyFade, p)
+  starField.material.opacity = 0.9 * skyFadeUniform.value
+  volumetricLevel = lerp(a.volumetric, b.volumetric, p)
+  if (setVolumetricEnabled) setVolumetricEnabled(volumetricLevel > 0.002, volumetricLevel)
+  // Discrete switches (tone mapper, CSS palette) — at the midpoint, masked by motion
+  if (!tr.mid && p >= 0.5) {
+    tr.mid = true
+    renderer.toneMapping = tr.to === 'night' ? THREE.NeutralToneMapping : THREE.ACESFilmicToneMapping
+    document.body.classList.toggle('light', tr.to === 'day')
+  }
+  if (tr.t >= 1) {
+    themeTransition = null
+    applyTheme(tr.to) // settle exact values + visibility flags
+  }
+}
 // ─── Game State ───────────────────────────────────────────────────────────────
 let NUM_DISKS = 4
 let stacks = [[], [], []]
 let moves = 0
 let gameWon = false
 // Drag state — lives only while user has mouse button held
-let dragInfo = null // { diskSize, fromPeg, stackPos }
+let dragInfo = null // { diskSize, fromPeg, stackPos, targetX, bobT }
 let isDragging = false // disk actively follows mouse (after lift completes)
 let liftAnim = null // { t, startY }
 // Post-release animation
-let dropAnim = null // { type:'valid'|'repel'|'return', phase, t, ... }
-let animating = false // drop/repel running — block new interactions
+let dropAnim = null // { type:'valid'|'repel'|'return', phase:'across'|'fall', ... }
+let animating = false // drop/repel/intro running — block new interactions
+// Per-disk animation FX — squash & stretch spring + velocity tilt
+const diskFX = {} // size -> { squash, squashV, vx, tilt, lastX }
+let introAnims = [] // staggered drop-in at game start
+const fxQueue = [] // { at, size, impulse } — delayed squash pulses (impact waves)
+let clockTime = 0
+let shakeAmp = 0
 // ─── Scene Objects ────────────────────────────────────────────────────────────
 const gameGroup = new THREE.Group()
 scene.add(gameGroup)
@@ -383,13 +742,170 @@ function getNearestPegToClient(clientX) {
   }
   return best
 }
+// ─── Particles ────────────────────────────────────────────────────────────────
+const _pDummy = new THREE.Object3D()
+const _pColor = new THREE.Color()
+function createParticlePool(count, geometry, material) {
+  const mesh = new THREE.InstancedMesh(geometry, material, count)
+  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+  mesh.frustumCulled = false
+  mesh.castShadow = false
+  mesh.receiveShadow = false
+  _pDummy.position.set(0, -100, 0)
+  _pDummy.rotation.set(0, 0, 0)
+  _pDummy.scale.setScalar(0.0001)
+  _pDummy.updateMatrix()
+  const parts = []
+  for (let i = 0; i < count; i++) {
+    mesh.setMatrixAt(i, _pDummy.matrix)
+    mesh.setColorAt(i, _pColor.set(0xffffff))
+    parts.push({ alive: false, age: 0, life: 1, size: 1, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, spin: false, rx: 0, ry: 0, rz: 0, rvx: 0, rvy: 0, rvz: 0 })
+  }
+  mesh.instanceMatrix.needsUpdate = true
+  scene.add(mesh)
+  return { mesh, parts, cursor: 0, dirty: false }
+}
+const dustPool = createParticlePool(
+  160,
+  new THREE.IcosahedronGeometry(0.05, 0),
+  new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0 }),
+)
+const confettiPool = createParticlePool(
+  240,
+  new THREE.BoxGeometry(0.11, 0.02, 0.07),
+  new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+)
+function spawnDust(x, y, z, radius, count, strength) {
+  for (let n = 0; n < count; n++) {
+    const i = dustPool.cursor
+    dustPool.cursor = (dustPool.cursor + 1) % dustPool.parts.length
+    const p = dustPool.parts[i]
+    const a = Math.random() * Math.PI * 2
+    const speed = (1.1 + Math.random() * 1.8) * strength
+    p.alive = true
+    p.age = 0
+    p.life = 0.45 + Math.random() * 0.4
+    p.size = 0.7 + Math.random() * 0.9
+    p.x = x + Math.cos(a) * radius * 0.92
+    p.y = y + Math.random() * 0.06
+    p.z = z + Math.sin(a) * radius * 0.92
+    p.vx = Math.cos(a) * speed
+    p.vz = Math.sin(a) * speed
+    p.vy = 0.5 + Math.random() * 1.3 * strength
+    p.spin = false
+    dustPool.mesh.setColorAt(i, _pColor.setHex(THEMES[currentTheme].dust))
+  }
+  dustPool.mesh.instanceColor.needsUpdate = true
+}
+function spawnConfetti(x, y, z, count) {
+  for (let n = 0; n < count; n++) {
+    const i = confettiPool.cursor
+    confettiPool.cursor = (confettiPool.cursor + 1) % confettiPool.parts.length
+    const p = confettiPool.parts[i]
+    const a = Math.random() * Math.PI * 2
+    const horiz = 1 + Math.random() * 3.2
+    p.alive = true
+    p.age = 0
+    p.life = 1.7 + Math.random() * 0.9
+    p.size = 0.8 + Math.random() * 0.8
+    p.x = x + (Math.random() - 0.5) * 0.5
+    p.y = y + (Math.random() - 0.5) * 0.3
+    p.z = z + (Math.random() - 0.5) * 0.5
+    p.vx = Math.cos(a) * horiz
+    p.vz = Math.sin(a) * horiz
+    p.vy = 5 + Math.random() * 6.5
+    p.spin = true
+    p.rx = Math.random() * Math.PI * 2
+    p.ry = Math.random() * Math.PI * 2
+    p.rz = Math.random() * Math.PI * 2
+    p.rvx = (Math.random() - 0.5) * 18
+    p.rvy = (Math.random() - 0.5) * 18
+    p.rvz = (Math.random() - 0.5) * 18
+    confettiPool.mesh.setColorAt(i, _pColor.setHex(DISK_COLORS[Math.floor(Math.random() * DISK_COLORS.length)]))
+  }
+  confettiPool.mesh.instanceColor.needsUpdate = true
+}
+function tickPool(pool, delta, gravity, drag) {
+  const damp = Math.exp(-drag * delta)
+  let any = false
+  for (let i = 0; i < pool.parts.length; i++) {
+    const p = pool.parts[i]
+    if (!p.alive) continue
+    any = true
+    p.age += delta
+    if (p.age >= p.life) {
+      p.alive = false
+      _pDummy.position.set(0, -100, 0)
+      _pDummy.scale.setScalar(0.0001)
+      _pDummy.updateMatrix()
+      pool.mesh.setMatrixAt(i, _pDummy.matrix)
+      continue
+    }
+    p.vx *= damp
+    p.vz *= damp
+    p.vy = p.vy * damp + gravity * delta
+    p.x += p.vx * delta
+    p.y += p.vy * delta
+    p.z += p.vz * delta
+    if (p.y < 0.03) { p.y = 0.03; p.vy *= -0.3 }
+    const fade = Math.min(1, (p.life - p.age) / (p.life * 0.35))
+    _pDummy.position.set(p.x, p.y, p.z)
+    if (p.spin) {
+      p.rx += p.rvx * delta
+      p.ry += p.rvy * delta
+      p.rz += p.rvz * delta
+      _pDummy.rotation.set(p.rx, p.ry, p.rz)
+    } else {
+      _pDummy.rotation.set(0, 0, 0)
+    }
+    _pDummy.scale.setScalar(p.size * fade)
+    _pDummy.updateMatrix()
+    pool.mesh.setMatrixAt(i, _pDummy.matrix)
+  }
+  if (any || pool.dirty) pool.mesh.instanceMatrix.needsUpdate = true
+  pool.dirty = any
+}
+function tickParticles(delta) {
+  tickPool(dustPool, delta, -5.5, 2.2)
+  tickPool(confettiPool, delta, -13, 0.6)
+}
+// ─── Camera Shake ─────────────────────────────────────────────────────────────
+function addShake(a) {
+  shakeAmp = Math.min(shakeAmp + a, 0.4)
+}
+function tickShake(delta, time) {
+  if (shakeAmp < 0.0005) { shakeAmp = 0; return }
+  updateCamera()
+  const t = time * 0.001
+  camera.position.y += Math.sin(t * 91) * shakeAmp
+  camera.position.x += Math.sin(t * 83 + 1.7) * shakeAmp * 0.6
+  shakeAmp *= Math.exp(-7 * delta)
+}
 // ─── Build Scene ──────────────────────────────────────────────────────────────
+// Lathe profile with rounded edges + slight taper — reads far better than a raw cylinder
+function buildDiskGeometry(r) {
+  const h = DISK_HEIGHT
+  const b = 0.09 // bevel radius
+  const rt = r - 0.06 // top taper
+  const pts = [new THREE.Vector2(0.01, -h / 2), new THREE.Vector2(r - b, -h / 2)]
+  for (let i = 1; i <= 5; i++) {
+    const a = (i / 5) * Math.PI * 0.5
+    pts.push(new THREE.Vector2(r - b + Math.sin(a) * b, -h / 2 + b - Math.cos(a) * b))
+  }
+  for (let i = 0; i <= 5; i++) {
+    const a = (i / 5) * Math.PI * 0.5
+    pts.push(new THREE.Vector2(rt - b + Math.cos(a) * b, h / 2 - b + Math.sin(a) * b))
+  }
+  pts.push(new THREE.Vector2(0.01, h / 2))
+  return new THREE.LatheGeometry(pts, 64)
+}
 function buildScene() {
   while (gameGroup.children.length > 0) gameGroup.remove(gameGroup.children[0])
   clickZones.length = 0
   ringMeshes.length = 0
   pegMaterials.length = 0
   for (const k in diskMeshes) delete diskMeshes[k]
+  for (const k in diskFX) delete diskFX[k]
   // Vast landscape — flat play zone, prior rolling hills beyond
   const TERRAIN_SIZE = 520
   const TERRAIN_SEGS = 160
@@ -422,7 +938,7 @@ function buildScene() {
   gameGroup.add(terrainMesh)
   const ringR = getDiskRadius(NUM_DISKS) + 0.4
   for (let i = 0; i < 3; i++) {
-    // Peg rod
+    // Peg rod + rounded cap
     const pegMat = new THREE.MeshStandardMaterial({ color: 0x8a8a8a, roughness: 0.85, metalness: 0.05 })
     pegMaterials.push(pegMat)
     const peg = new THREE.Mesh(
@@ -432,6 +948,18 @@ function buildScene() {
     peg.position.set(PEG_X[i], PEG_HEIGHT / 2, 0)
     peg.castShadow = true
     gameGroup.add(peg)
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(PEG_RADIUS * 0.8, 12, 8), pegMat)
+    cap.position.set(PEG_X[i], PEG_HEIGHT, 0)
+    cap.castShadow = true
+    gameGroup.add(cap)
+    // Landing pad under each peg — grounds the tower visually
+    const pad = new THREE.Mesh(
+      new THREE.CylinderGeometry(ringR + 0.3, ringR + 0.45, 0.16, 48),
+      pegMat,
+    )
+    pad.position.set(PEG_X[i], -0.02, 0)
+    pad.receiveShadow = true
+    gameGroup.add(pad)
     // Wide invisible cylinder — easy click/drag target
     const cz = new THREE.Mesh(
       new THREE.CylinderGeometry(DISK_MAX_R + 0.5, DISK_MAX_R + 0.5, PEG_HEIGHT + 1, 8),
@@ -453,19 +981,22 @@ function buildScene() {
       }),
     )
     ring.rotation.x = Math.PI / 2
-    ring.position.set(PEG_X[i], 0.04, 0)
+    ring.position.set(PEG_X[i], 0.13, 0)
+    ring.userData = { targetOpacity: 0, targetIntensity: 0, pulse: false }
     gameGroup.add(ring)
     ringMeshes.push(ring)
   }
-  // Disks
+  // Disks — beveled lathe profile, clearcoat finish
   for (let size = 1; size <= NUM_DISKS; size++) {
     const r = getDiskRadius(size)
     const disk = new THREE.Mesh(
-      new THREE.CylinderGeometry(r - 0.08, r, DISK_HEIGHT, 48),
-      new THREE.MeshStandardMaterial({
+      buildDiskGeometry(r),
+      new THREE.MeshPhysicalMaterial({
         color: DISK_COLORS[(size - 1) % DISK_COLORS.length],
-        roughness: 0.3,
-        metalness: 0.15,
+        roughness: 0.34,
+        metalness: 0.12,
+        clearcoat: 0.7,
+        clearcoatRoughness: 0.3,
       }),
     )
     disk.castShadow = true
@@ -473,30 +1004,34 @@ function buildScene() {
     disk.userData = { diskSize: size }
     gameGroup.add(disk)
     diskMeshes[size] = disk
-  }
-}
-function positionAllDisks() {
-  for (let p = 0; p < 3; p++) {
-    for (let s = 0; s < stacks[p].length; s++) {
-      diskMeshes[stacks[p][s]].position.set(PEG_X[p], getDiskY(s), 0)
-    }
+    diskFX[size] = { squash: 1, squashV: 0, vx: 0, tilt: 0, lastX: null }
   }
 }
 // ─── Ring Helpers ─────────────────────────────────────────────────────────────
 function clearRings() {
   for (const r of ringMeshes) {
-    r.material.opacity = 0
-    r.material.emissiveIntensity = 0
-    r.material.color.set(0xffeb3b)
-    r.material.emissive.set(0xffeb3b)
+    r.userData.targetOpacity = 0
+    r.userData.targetIntensity = 0
+    r.userData.pulse = false
   }
 }
 function setRing(pegIdx, colorHex, opacity = 0.85) {
   const r = ringMeshes[pegIdx]
   r.material.color.set(colorHex)
   r.material.emissive.set(colorHex)
-  r.material.opacity = opacity
-  r.material.emissiveIntensity = 1.4
+  r.userData.targetOpacity = opacity
+  r.userData.targetIntensity = 1.4
+  r.userData.pulse = colorHex === 0x00e676
+}
+function tickRings(delta, time) {
+  const k = Math.min(delta * 14, 1)
+  for (const r of ringMeshes) {
+    r.material.opacity += (r.userData.targetOpacity - r.material.opacity) * k
+    r.material.emissiveIntensity += (r.userData.targetIntensity - r.material.emissiveIntensity) * k
+    const pulsing = r.userData.pulse && r.material.opacity > 0.05
+    const s = pulsing ? 1 + Math.sin(time * 0.007) * 0.04 : 1
+    r.scale.set(s, s, 1)
+  }
 }
 // Show ring for the peg the disk is snapped to
 function updateDragRings(nearPeg) {
@@ -511,10 +1046,84 @@ function updateDragRings(nearPeg) {
     setRing(nearPeg, 0xff3333) // red = blocked
   }
 }
+// ─── Disk FX ── squash & stretch + velocity tilt, shared by every animation ──
+function applySquashImpulse(size, impulse) {
+  const fx = diskFX[size]
+  if (fx) fx.squashV -= impulse
+}
+function tickDiskFX(delta) {
+  for (let size = 1; size <= NUM_DISKS; size++) {
+    const mesh = diskMeshes[size]
+    const fx = diskFX[size]
+    if (!mesh || !fx) continue
+    // Tilt follows horizontal velocity — disks bank into their motion
+    const vel = fx.lastX == null ? 0 : (mesh.position.x - fx.lastX) / Math.max(delta, 1e-4)
+    fx.lastX = mesh.position.x
+    const tiltTarget = THREE.MathUtils.clamp(-vel * 0.012, -0.25, 0.25)
+    fx.tilt += (tiltTarget - fx.tilt) * Math.min(delta * 14, 1)
+    mesh.rotation.z = fx.tilt
+    // Spring squash back toward rest
+    const accel = (1 - fx.squash) * SQUASH_STIFFNESS - fx.squashV * SQUASH_DAMPING
+    fx.squashV += accel * delta
+    fx.squash = THREE.MathUtils.clamp(fx.squash + fx.squashV * delta, 0.45, 1.5)
+    const s = fx.squash
+    mesh.scale.set(1 + (1 - s) * 0.55, s, 1 + (1 - s) * 0.55)
+  }
+}
+function isDiskAnimating(size) {
+  if (dragInfo && dragInfo.diskSize === size) return true
+  if (dropAnim && dropAnim.diskSize === size) return true
+  for (const a of introAnims) if (a.size === size) return true
+  return false
+}
+// Resting disks: snap to stack slot, keeping the squashed bottom planted
+function tickRestingDisks() {
+  for (let p = 0; p < 3; p++) {
+    for (let s = 0; s < stacks[p].length; s++) {
+      const size = stacks[p][s]
+      if (isDiskAnimating(size)) continue
+      const mesh = diskMeshes[size]
+      const fx = diskFX[size]
+      if (!mesh || !fx) continue
+      mesh.position.x = PEG_X[p]
+      mesh.position.z = 0
+      mesh.position.y = getDiskY(s) - (1 - Math.min(fx.squash, 1)) * DISK_HEIGHT * 0.5
+    }
+  }
+}
+function tickFxQueue() {
+  for (let i = fxQueue.length - 1; i >= 0; i--) {
+    if (clockTime >= fxQueue[i].at) {
+      applySquashImpulse(fxQueue[i].size, fxQueue[i].impulse)
+      fxQueue.splice(i, 1)
+    }
+  }
+}
+// Impact: squash the landing disk, puff dust at its rim, thud, shake the camera,
+// and send a compression wave down the stack underneath
+function onDiskImpact(diskSize, peg, restY, impact, belowCount) {
+  applySquashImpulse(diskSize, impact * 5.5)
+  const r = getDiskRadius(diskSize)
+  spawnDust(
+    PEG_X[peg],
+    Math.max(restY - DISK_HEIGHT / 2, BASE_TOP_Y) + 0.04,
+    0,
+    r,
+    Math.round(6 + impact * 10),
+    0.6 + impact,
+  )
+  addShake(impact * 0.05 + (diskSize / NUM_DISKS) * impact * 0.06)
+  sfx.drop(Math.min(impact + 0.2, 1))
+  for (let d = 0; d < belowCount; d++) {
+    const size = stacks[peg][belowCount - 1 - d]
+    if (size == null) break
+    fxQueue.push({ at: clockTime + 0.03 + d * 0.035, size, impulse: impact * 2.2 * Math.pow(0.7, d) })
+  }
+}
 // ─── Lift Animation ───────────────────────────────────────────────────────────
 function tickLift(delta) {
   liftAnim.t += delta / LIFT_DUR
-  const p = easeInOut(Math.min(liftAnim.t, 1))
+  const p = easeOutBack(Math.min(liftAnim.t, 1), 1.4)
   diskMeshes[dragInfo.diskSize].position.y = liftAnim.startY + (LIFT_Y - liftAnim.startY) * p
   if (liftAnim.t >= 1) {
     diskMeshes[dragInfo.diskSize].position.y = LIFT_Y
@@ -522,62 +1131,97 @@ function tickLift(delta) {
     isDragging = true
   }
 }
+// ─── Drag Spring ── disk chases the snapped peg with a damped spring + bob ───
+function tickDragSpring(delta) {
+  if (!dragInfo || !isDragging || animating) return
+  const mesh = diskMeshes[dragInfo.diskSize]
+  const fx = diskFX[dragInfo.diskSize]
+  const c = 2 * Math.sqrt(DRAG_SPRING_K) * DRAG_SPRING_DAMPING
+  fx.vx += ((dragInfo.targetX - mesh.position.x) * DRAG_SPRING_K - fx.vx * c) * delta
+  mesh.position.x += fx.vx * delta
+  dragInfo.bobT += delta
+  mesh.position.y = LIFT_Y + Math.sin(dragInfo.bobT * 3.1) * 0.07
+}
 // ─── Drop / Repel Animation ───────────────────────────────────────────────────
+function finishDrop(a) {
+  diskMeshes[a.diskSize].position.y = a.targetY
+  if (a.type === 'valid') {
+    stacks[a.fromPeg].pop()
+    stacks[a.toPeg].push(a.diskSize)
+    moves++
+    updateUI()
+    checkWin()
+  }
+  dropAnim = null
+  dragInfo = null
+  animating = false
+}
 function tickDrop(delta) {
   const a = dropAnim
   const mesh = diskMeshes[a.diskSize]
-  a.t += delta
   if (a.phase === 'across') {
+    a.t += delta
     const dur = a.type === 'valid' ? DROP_DUR.across : DROP_DUR.repelAcross
     const ease = a.type === 'repel' ? easeOutBack : easeInOut
     const p = ease(Math.min(a.t / dur, 1))
     mesh.position.x = a.startX + (a.targetX - a.startX) * p
     if (a.t >= dur) {
       mesh.position.x = a.targetX
-      a.t = 0
-      a.phase = 'down'
+      a.phase = 'fall'
+      a.vy = 0
     }
-  } else if (a.phase === 'down') {
-    const dur = a.type === 'valid' ? DROP_DUR.down : DROP_DUR.repelDown
-    const p = easeInOut(Math.min(a.t / dur, 1))
-    mesh.position.y = LIFT_Y + (a.targetY - LIFT_Y) * p
-    if (a.t >= dur) {
-      mesh.position.y = a.targetY
-      if (a.type === 'valid') {
-        stacks[a.fromPeg].pop()
-        stacks[a.toPeg].push(a.diskSize)
-        moves++
-        updateUI()
-        checkWin()
-      }
-      dropAnim = null
-      dragInfo = null
-      animating = false
+  } else {
+    // Gravity fall with a single small bounce
+    a.vy += GRAVITY * delta
+    mesh.position.y += a.vy * delta
+    if (mesh.position.y > a.targetY) return
+    mesh.position.y = a.targetY
+    const impact = THREE.MathUtils.clamp(-a.vy / 42, 0, 1)
+    if (!a.bounced && impact > 0.2) {
+      a.bounced = true
+      a.vy = -a.vy * BOUNCE_RESTITUTION
+      onDiskImpact(a.diskSize, a.peg, a.targetY, impact, a.belowCount)
+    } else {
+      finishDrop(a)
+    }
+  }
+}
+// ─── Intro ── disks rain onto the first peg, bottom-up, with bounce + dust ───
+function startIntro() {
+  introAnims = []
+  for (let s = 0; s < stacks[0].length; s++) {
+    const size = stacks[0][s]
+    const targetY = getDiskY(s)
+    diskMeshes[size].position.set(PEG_X[0], targetY + 7 + s * 2.6, 0)
+    introAnims.push({ size, peg: 0, targetY, vy: 0, bounced: false, belowCount: s })
+  }
+  animating = introAnims.length > 0
+}
+function tickIntro(delta) {
+  for (let i = introAnims.length - 1; i >= 0; i--) {
+    const a = introAnims[i]
+    const mesh = diskMeshes[a.size]
+    a.vy += GRAVITY * delta
+    mesh.position.y += a.vy * delta
+    if (mesh.position.y > a.targetY) continue
+    mesh.position.y = a.targetY
+    const impact = THREE.MathUtils.clamp(-a.vy / 46, 0, 1)
+    if (!a.bounced && impact > 0.2) {
+      a.bounced = true
+      a.vy = -a.vy * BOUNCE_RESTITUTION
+      onDiskImpact(a.size, a.peg, a.targetY, impact * 0.8, a.belowCount)
+    } else {
+      introAnims.splice(i, 1)
+      if (!introAnims.length && !dropAnim) animating = false
     }
   }
 }
 // ─── Raycasting ───────────────────────────────────────────────────────────────
 const raycaster = new THREE.Raycaster()
 const mouse = new THREE.Vector2()
-const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -LIFT_Y)
-const dragHit = new THREE.Vector3()
 function setMouse(e) {
   mouse.x = (e.clientX / window.innerWidth) * 2 - 1
   mouse.y = -(e.clientY / window.innerHeight) * 2 + 1
-}
-function getPegAt(e) {
-  setMouse(e)
-  raycaster.setFromCamera(mouse, camera)
-  const hits = raycaster.intersectObjects(clickZones)
-  return hits.length ? hits[0].object.userData.pegIndex : -1
-}
-function getDragX(e) {
-  setMouse(e)
-  raycaster.setFromCamera(mouse, camera)
-  if (raycaster.ray.intersectPlane(dragPlane, dragHit)) {
-    return Math.max(PEG_X[0] - 3, Math.min(PEG_X[2] + 3, dragHit.x))
-  }
-  return null
 }
 // ─── Camera Controls ──────────────────────────────────────────────────────────
 function getCameraYawPitch() {
@@ -661,9 +1305,12 @@ function tryStartDiskDrag(e) {
   if (!raycaster.intersectObjects(clickZones).length) return false
   if (!stacks[best].length) return false
   const diskSize = stacks[best][stacks[best].length - 1]
-  dragInfo = { diskSize, fromPeg: best, stackPos: stacks[best].length - 1 }
+  dragInfo = { diskSize, fromPeg: best, stackPos: stacks[best].length - 1, targetX: PEG_X[best], bobT: 0 }
   liftAnim = { t: 0, startY: diskMeshes[diskSize].position.y }
   isDragging = false
+  diskFX[diskSize].vx = 0
+  applySquashImpulse(diskSize, -2.0) // stretch on pickup
+  sfx.lift()
   document.body.style.cursor = 'grabbing'
   return true
 }
@@ -720,8 +1367,8 @@ canvas.addEventListener('mousemove', (e) => {
   const { diskSize, fromPeg } = dragInfo
   const toStack = stacks[nearPeg]
   const blocked = nearPeg !== fromPeg && toStack.length > 0 && toStack[toStack.length - 1] < diskSize
-  // Blocked peg: keep disk at source, still show red ring so user knows why
-  diskMeshes[diskSize].position.x = blocked ? PEG_X[fromPeg] : PEG_X[nearPeg]
+  // Blocked peg: spring stays at source, still show red ring so user knows why
+  dragInfo.targetX = blocked ? PEG_X[fromPeg] : PEG_X[nearPeg]
   if (isDragging) updateDragRings(nearPeg)
 })
 window.addEventListener('mouseup', (e) => {
@@ -745,11 +1392,10 @@ window.addEventListener('mouseup', (e) => {
   animating = true
   clearRings()
   const mesh = diskMeshes[dragInfo.diskSize]
-  const diskX = mesh.position.x
-  const { diskSize, fromPeg, stackPos } = dragInfo
-  // Use disk's world X (already enforced to a valid snap) rather than raw mouse position.
-  // Fall back to fromPeg if x somehow drifted off a snap position.
-  let toPeg = PEG_X.findIndex(px => Math.abs(px - diskX) < 0.01)
+  const { diskSize, fromPeg, stackPos, targetX } = dragInfo
+  diskFX[diskSize].vx = 0
+  // The snapped target X (not the springing mesh position) decides the peg
+  let toPeg = PEG_X.findIndex(px => Math.abs(px - targetX) < 0.01)
   if (toPeg === -1) toPeg = fromPeg
   const toStack = stacks[toPeg]
   const isValid = toPeg !== fromPeg && (!toStack.length || toStack[toStack.length - 1] > diskSize)
@@ -757,25 +1403,28 @@ window.addEventListener('mouseup', (e) => {
   if (isValid) {
     dropAnim = {
       type: 'valid',
-      diskSize, fromPeg, toPeg,
-      phase: 'across', t: 0,
-      startX: diskX,
+      diskSize, fromPeg, toPeg, peg: toPeg,
+      phase: 'across', t: 0, vy: 0, bounced: false,
+      startX: mesh.position.x,
       targetX: PEG_X[toPeg],
       targetY: getDiskY(toStack.length),
+      belowCount: toStack.length,
     }
   } else {
     // Flash invalid peg red briefly
     if (toPeg !== fromPeg) {
       setRing(toPeg, 0xff3333, 0.9)
       setTimeout(clearRings, 320)
+      sfx.invalid()
     }
     dropAnim = {
       type: toPeg === fromPeg ? 'return' : 'repel',
-      diskSize, fromPeg,
-      phase: 'across', t: 0,
-      startX: diskX,
+      diskSize, fromPeg, peg: fromPeg,
+      phase: 'across', t: 0, vy: 0, bounced: false,
+      startX: mesh.position.x,
       targetX: PEG_X[fromPeg],
       targetY: getDiskY(stackPos),
+      belowCount: stackPos,
     }
   }
 })
@@ -822,7 +1471,14 @@ function updateTopDiskHighlight() {
   for (let size = 1; size <= NUM_DISKS; size++) {
     if (diskMeshes[size]) diskMeshes[size].material.emissiveIntensity = 0
   }
-  if (dragInfo || animating) return
+  if (dragInfo || animating) {
+    if (dragInfo) {
+      const m = diskMeshes[dragInfo.diskSize]
+      m.material.emissive.copy(m.material.color)
+      m.material.emissiveIntensity = 0.35
+    }
+    return
+  }
   for (let p = 0; p < 3; p++) {
     if (stacks[p].length) {
       const topSize = stacks[p][stacks[p].length - 1]
@@ -834,18 +1490,39 @@ function updateTopDiskHighlight() {
   }
 }
 function updateUI() {
-  document.getElementById('moves').textContent = moves
+  const movesEl = document.getElementById('moves')
+  if (movesEl.textContent !== String(moves)) {
+    movesEl.textContent = moves
+    if (moves > 0) {
+      movesEl.classList.remove('bump')
+      void movesEl.offsetWidth // restart the animation
+      movesEl.classList.add('bump')
+    }
+  }
   document.getElementById('min-moves').textContent = (1 << NUM_DISKS) - 1
   updateDebugDisplay()
+}
+// ─── Win Celebration ──────────────────────────────────────────────────────────
+function celebrate() {
+  sfx.win()
+  const topY = PEG_HEIGHT + 1.2
+  spawnConfetti(PEG_X[2], topY, 0, 90)
+  setTimeout(() => spawnConfetti(PEG_X[0], topY * 0.8, 0, 50), 280)
+  setTimeout(() => spawnConfetti(PEG_X[1], topY * 0.9, 0, 50), 520)
+  // Bounce wave up the solved tower
+  for (let s = 0; s < stacks[2].length; s++) {
+    fxQueue.push({ at: clockTime + 0.15 + s * 0.07, size: stacks[2][s], impulse: 3.2 })
+  }
 }
 function checkWin() {
   if (stacks[2].length === NUM_DISKS) {
     gameWon = true
+    celebrate()
     setTimeout(() => {
       document.getElementById('win-moves').textContent = moves
       document.getElementById('win-min').textContent = (1 << NUM_DISKS) - 1
       document.getElementById('win-overlay').style.display = 'flex'
-    }, 450)
+    }, 1600)
   }
 }
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -859,9 +1536,11 @@ function initGame(n) {
   liftAnim = null
   dropAnim = null
   animating = false
+  fxQueue.length = 0
+  themeTransition = null // mid-fade restart: snap to the target theme
   buildScene()
   applyTheme(currentTheme) // recolor freshly built terrain + pegs to active theme
-  positionAllDisks()
+  startIntro()
   updateUI()
   document.getElementById('win-overlay').style.display = 'none'
 }
@@ -948,10 +1627,26 @@ let lastTime = 0
 function animate(time) {
   const delta = Math.min((time - lastTime) / 1000, 0.05)
   lastTime = time
+  clockTime = time * 0.001
   if (liftAnim) tickLift(delta)
   if (dropAnim) tickDrop(delta)
+  if (introAnims.length) tickIntro(delta)
+  tickDragSpring(delta)
+  tickFxQueue()
+  tickDiskFX(delta)
+  tickRestingDisks()
+  tickRings(delta, time)
+  tickParticles(delta)
   tickCameraKeyboard(delta)
   tickDrone(time, delta)
+  tickEarth(delta)
+  tickThemeTransition(delta)
+  // Slow victory-lap orbit while the win celebration plays
+  if (gameWon && !isOrbiting && !isPanning) {
+    const { yaw, pitch, distance } = getCameraYawPitch()
+    setCameraYawPitch(yaw + delta * 0.12, pitch, distance)
+  }
+  tickShake(delta, time)
   updateTopDiskHighlight()
   if (renderPipeline) renderPipeline.render()
   else renderer.render(scene, camera)
@@ -970,7 +1665,13 @@ document.getElementById('play-again-btn').addEventListener('click', () => {
 })
 
 document.getElementById('theme-toggle').addEventListener('click', () => {
-  applyTheme(currentTheme === 'day' ? 'night' : 'day')
+  startThemeTransition(currentTheme === 'day' ? 'night' : 'day')
+})
+
+document.getElementById('sound-toggle').addEventListener('click', () => {
+  audioMuted = !audioMuted
+  if (!audioMuted) getAudioCtx()
+  document.getElementById('sound-toggle').textContent = audioMuted ? '🔇' : '🔊'
 })
 
 async function start() {

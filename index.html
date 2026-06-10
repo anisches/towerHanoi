@@ -105,6 +105,16 @@
       color: var(--accent);
     }
 
+    .hud-stat span.bump {
+      animation: stat-bump 0.3s ease;
+    }
+
+    @keyframes stat-bump {
+      0% { transform: scale(1); }
+      35% { transform: scale(1.4); }
+      100% { transform: scale(1); }
+    }
+
     .hud-controls { display: flex; align-items: center; gap: 10px; }
 
     select, button {
@@ -115,11 +125,15 @@
       border-radius: 6px;
       font-size: 0.82rem;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: background 0.2s, border-color 0.2s, transform 0.15s;
       outline: none;
     }
 
-    select:hover, button:hover { background: var(--panel-bg-hover); }
+    select:hover, button:hover {
+      background: var(--panel-bg-hover);
+      border-color: var(--accent-mid);
+    }
+    button:active { transform: scale(0.94); }
     select option { background: var(--bg); color: var(--text); }
 
     #hint {
@@ -188,6 +202,12 @@
       justify-content: center;
       backdrop-filter: blur(8px);
       z-index: 10;
+      animation: overlay-in 0.45s ease both;
+    }
+
+    @keyframes overlay-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
     }
 
     .win-card {
@@ -197,6 +217,12 @@
       padding: 44px 68px;
       text-align: center;
       box-shadow: var(--win-card-shadow);
+      animation: card-in 0.6s cubic-bezier(0.18, 1.25, 0.4, 1) both;
+    }
+
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(28px) scale(0.92); }
+      to { opacity: 1; transform: none; }
     }
 
     .win-card h2 {
@@ -228,16 +254,17 @@
 
     #play-again-btn:hover { background: var(--accent-hover); }
 
-    #theme-toggle {
+    #theme-toggle, #sound-toggle {
       position: fixed;
       bottom: 22px;
-      right: 24px;
       padding: 6px 12px;
       font-size: 0.75rem;
       letter-spacing: 0.5px;
       opacity: 0.7;
     }
-    #theme-toggle:hover { opacity: 1; }
+    #theme-toggle { right: 24px; }
+    #sound-toggle { right: 78px; }
+    #theme-toggle:hover, #sound-toggle:hover { opacity: 1; }
   </style>
 </head>
 <body>
@@ -277,6 +304,7 @@
     <div class="debug-peg"><div class="debug-peg-label">Peg C</div><div class="debug-disks" id="debug-c"></div></div>
   </div>
 
+  <button id="sound-toggle" title="Toggle sound">🔊</button>
   <button id="theme-toggle" title="Toggle day/night">🌙</button>
 
   <div id="win-overlay">
