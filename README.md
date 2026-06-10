@@ -4,6 +4,8 @@
 
 A beautiful 3D Tower of Hanoi puzzle built with [Three.js](https://threejs.org/) (WebGPU) + Vite. Drag-and-drop disks between pegs with visual feedback (green = valid, red = invalid) — set on another world, with Earth hanging in the night sky.
 
+![Tower of Hanoi 3D — night scene with Earth in the sky](screenshot.png)
+
 ## ✨ Features
 - **Interactive 3D gameplay** — Drag the top disk only
 - 3 to 7 disks with physics-based animations: real gravity drops with bounce, squash & stretch, spring-damped dragging, impact dust and camera shake
