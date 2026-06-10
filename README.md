@@ -25,6 +25,4 @@ This project is licensed under the [MIT License](LICENSE) — free to use, modif
 
 ---
 
-Made with ❤️ using Three.js & Vite
-
-**Star this repo if you like it!** ⭐
+Made using Three.js
